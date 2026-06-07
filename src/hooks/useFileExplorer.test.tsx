@@ -60,21 +60,21 @@ describe('useFileExplorer change scope', () => {
     const { result } = renderHook(() => useFileExplorer({ directory: '/repo', autoLoad: true, sessionId: 'session-1' }))
 
     await waitFor(() => {
-      expect(result.current.fileStatus.get('src/session.ts')?.status).toBe('modified')
-    })
-
-    expect(getSessionDiff).toHaveBeenCalledWith('session-1', '/repo')
-
-    act(() => {
-      changeScopeStore.setMode('session-1', 'turn')
-    })
-
-    await waitFor(() => {
       expect(result.current.fileStatus.get('src/turn.ts')?.status).toBe('added')
     })
 
-    expect(result.current.fileStatus.get('src/session.ts')).toBeUndefined()
     expect(getLastTurnDiff).toHaveBeenCalledWith('session-1', '/repo')
+
+    act(() => {
+      changeScopeStore.setMode('session-1', 'session')
+    })
+
+    await waitFor(() => {
+      expect(result.current.fileStatus.get('src/session.ts')?.status).toBe('modified')
+    })
+
+    expect(result.current.fileStatus.get('src/turn.ts')).toBeUndefined()
+    expect(getSessionDiff).toHaveBeenCalledWith('session-1', '/repo')
   })
 
   it('restores expanded folders per directory when switching projects', async () => {
