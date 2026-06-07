@@ -335,7 +335,7 @@ const FileTreeItem = memo(function FileTreeItem({
           text-text-300
           ${node.ignored ? 'opacity-50' : ''}
         `}
-        style={{ paddingLeft: `${depth * 12 + 8}px`, touchAction: 'none' }}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         {/* Expand/Collapse Icon */}
         {isDirectory ? (
