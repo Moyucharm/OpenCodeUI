@@ -218,6 +218,10 @@ export function useTheme() {
     themeStore.setExternalFileDropMode(mode)
   }, [])
 
+  const setOutlineCurrentHighlight = useCallback((enabled: boolean) => {
+    themeStore.setOutlineCurrentHighlight(enabled)
+  }, [])
+
   return {
     // 日夜模式（向后兼容）
     mode: state.colorMode,
@@ -314,5 +318,9 @@ export function useTheme() {
     // 外部文件拖拽模式
     externalFileDropMode: state.externalFileDropMode,
     setExternalFileDropMode,
+
+    // 对话历史导航当前位置高亮
+    outlineCurrentHighlight: state.outlineCurrentHighlight,
+    setOutlineCurrentHighlight,
   }
 }

@@ -12,11 +12,8 @@
   will-change: auto;
 }
 
-/* ============================================
- * Scroll-to-message offset
- * 导航到消息时保留顶部空间避免被标题栏遮挡
- * ============================================ */
-[data-message-id] {
+/* 导航到消息时保留顶部空间，避免被对话标题栏遮挡。 */
+[data-chat-scroll-root='true'] [data-message-id] {
   scroll-margin-top: 72px;
 }
 

@@ -208,11 +208,18 @@ export const ChatPane = memo(function ChatPane({
   // ============================================
   const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([])
   const visibleMessageIdsRef = useRef<string[]>([])
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
+  const activeMessageIdRef = useRef<string | null>(null)
   const setVisibleMessageIdsStable = useCallback((ids: string[]) => {
     const prev = visibleMessageIdsRef.current
     if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return
     visibleMessageIdsRef.current = ids
     setVisibleMessageIds(ids)
+  }, [])
+  const setActiveMessageIdStable = useCallback((id: string | null) => {
+    if (activeMessageIdRef.current === id) return
+    activeMessageIdRef.current = id
+    setActiveMessageId(id)
   }, [])
   const [isAtBottom, setIsAtBottom] = useState(true)
 
@@ -729,7 +736,7 @@ export const ChatPane = memo(function ChatPane({
     if (questionRequestId) setQuestionCollapsed(false)
   }, [questionRequestId])
 
-  const { inlineToolRequests } = useTheme()
+  const { inlineToolRequests, outlineCurrentHighlight } = useTheme()
 
   const inlineToolRequestCtx = useMemo<InlineToolRequestContextValue>(
     () => ({
@@ -810,6 +817,7 @@ export const ChatPane = memo(function ChatPane({
               retryStatus={retryStatus}
               bottomPadding={inputBoxHeight}
               onVisibleMessageIdsChange={handleVisibleIdsChange}
+              onActiveMessageIdChange={setActiveMessageIdStable}
               onAtBottomChange={setIsAtBottom}
             />
           </ErrorBoundary>
@@ -820,6 +828,7 @@ export const ChatPane = memo(function ChatPane({
         messages={renderedMessages}
         sourceEntries={chatPageViewModel.outlineSourceEntries}
         visibleMessageIds={visibleMessageIds}
+        activeMessageId={outlineCurrentHighlight ? activeMessageId : null}
         onScrollToMessageId={handleOutlineScrollToMessage}
       />
 

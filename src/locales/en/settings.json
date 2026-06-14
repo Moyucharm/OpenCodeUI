@@ -90,6 +90,8 @@
     "conversationExperienceDesc": "Message density, reasoning style, and step summary fields",
     "collapseLongMessages": "Collapse Long Messages",
     "collapseLongMessagesDesc": "Auto-collapse lengthy user messages",
+    "outlineCurrentHighlight": "Highlight Current Position",
+    "outlineCurrentHighlightDesc": "Mark the user prompt that owns the current viewport in the right-side history rail",
     "descriptiveToolSteps": "Descriptive Steps",
     "descriptiveToolStepsDesc": "Replace plain step counts with tool-aware summaries and show a steps line even for single tool calls",
     "inlineToolRequests": "Inline Tool Requests",
