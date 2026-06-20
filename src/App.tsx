@@ -207,12 +207,10 @@ function App() {
   const shouldRenderMobileRightPanelRef = useRef(false)
   const [shouldRenderMobileRightPanel, setShouldRenderMobileRightPanel] = useState(false)
   const mobilePagerInMotionRef = useRef(false)
-  const [isMobilePagerInMotion, setIsMobilePagerInMotion] = useState(false)
 
   const setMobilePagerInMotion = useCallback((inMotion: boolean) => {
     if (mobilePagerInMotionRef.current === inMotion) return
     mobilePagerInMotionRef.current = inMotion
-    setIsMobilePagerInMotion(inMotion)
   }, [])
 
   const setMobileRightPanelRendered = useCallback((rendered: boolean) => {
@@ -233,7 +231,6 @@ function App() {
   }, [clearMobileRightUnmountTimer, setMobileRightPanelRendered])
 
   const mobileActivePage: MobilePagerPage = rightPanelOpen ? 'right' : sidebarExpanded ? 'left' : 'chat'
-  const showMobileChatFrame = isMobilePagerInMotion || sidebarExpanded
 
   const getMobilePageScrollLeft = useCallback(
     (page: MobilePagerPage) => (page === 'left' ? 0 : page === 'right' ? mobileRightScrollLeft : mobileChatScrollLeft),
@@ -299,16 +296,23 @@ function App() {
     const pager = mobilePagerRef.current
     if (!pager) return
 
+    const scrollLeft = pager.scrollLeft
     const activePageLeft = getMobilePageScrollLeft(mobileActivePage)
-    if (Math.abs(pager.scrollLeft - activePageLeft) > 1.5) {
+
+    // 3D 效果计算：基于当前 scrollLeft 相对于聊天页位置的偏移
+    // -1 (滑向左栏) 到 0 (对话页) 到 1 (滑向右栏)
+    const progress = (scrollLeft - mobileChatScrollLeft) / (scrollLeft < mobileChatScrollLeft ? mobileLeftPanelWidth : mobilePageWidth)
+    pager.style.setProperty('--mobile-pager-progress', progress.toString())
+
+    if (Math.abs(scrollLeft - activePageLeft) > 1.5) {
       setMobilePagerInMotion(true)
     }
 
-    if (!mobilePagerInteractingRef.current && Math.abs(pager.scrollLeft - mobileRightScrollLeft) <= MOBILE_PAGER_SETTLED_PX) {
+    if (!mobilePagerInteractingRef.current && Math.abs(scrollLeft - mobileRightScrollLeft) <= MOBILE_PAGER_SETTLED_PX) {
       setMobilePagerInMotion(false)
     }
 
-    if (pager.scrollLeft > mobileChatScrollLeft + 24) {
+    if (scrollLeft > mobileChatScrollLeft + 24) {
       ensureMobileRightPanelRendered()
     }
 
@@ -334,6 +338,8 @@ function App() {
     getMobilePageScrollLeft,
     mobileActivePage,
     mobileChatScrollLeft,
+    mobileLeftPanelWidth,
+    mobilePageWidth,
     mobileRightScrollLeft,
     setMobilePagerInMotion,
     syncMobilePagerState,
@@ -857,6 +863,8 @@ function App() {
                   overscrollBehaviorX: 'contain',
                   scrollbarWidth: 'none',
                   WebkitOverflowScrolling: 'touch',
+                  perspective: '1200px',
+                  perspectiveOrigin: '50% 50%',
                 }}
                 onScroll={handleMobilePagerScroll}
                 onTouchStart={handleMobilePagerInteractionStart}
@@ -898,13 +906,19 @@ function App() {
                     scrollSnapAlign: 'start',
                     scrollSnapStop: 'always',
                   }}
-                  >
+                >
                   <div
-                    className={`relative z-10 flex h-full flex-col overflow-hidden bg-bg-100 [contain:layout_paint] ${showMobileChatFrame ? 'rounded-xl shadow-[0_0_16px_hsl(var(--always-black)/0.08)]' : ''}`}
+                    className="absolute inset-y-0 -left-4 -right-4 z-10 flex flex-col overflow-hidden bg-bg-100 rounded-xl shadow-[0_0_24px_hsl(var(--always-black)/0.15)] [contain:layout_paint]"
                     aria-hidden={mobileActivePage !== 'chat'}
                     inert={mobileActivePage !== 'chat'}
+                    style={{
+                      transform: 'translate3d(0, 0, 0) rotateY(calc(var(--mobile-pager-progress, 0) * 12deg)) scale(calc(1 - abs(var(--mobile-pager-progress, 0)) * 0.08))',
+                      transformStyle: 'preserve-3d',
+                      backfaceVisibility: 'hidden',
+                      willChange: 'transform',
+                    }}
                   >
-                    <div className={paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'flex-1 min-h-0 p-2' : 'flex-1 min-h-0'}>
+                    <div className={`flex-1 min-h-0 px-4 ${paneLayout.isSplit && !paneLayout.fullscreenPaneId ? 'py-2' : ''}`}>
                       <SplitContainer
                         node={paneLayout.root}
                         renderLeaf={renderPaneLeaf}
@@ -912,13 +926,10 @@ function App() {
                       />
                     </div>
 
-                    {showMobileChatFrame && (
-                      <div
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 z-[80] rounded-xl border-x border-border-200/50"
-                      />
-                    )}
-
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 z-[80] rounded-xl border-x border-border-200/50"
+                    />
                   </div>
 
                   {sidebarExpanded && (
