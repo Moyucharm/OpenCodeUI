@@ -31,7 +31,7 @@
 
 /* 导航到消息时保留顶部空间，避免被对话标题栏遮挡。 */
 [data-chat-scroll-root='true'] [data-message-id] {
-  scroll-margin-top: 72px;
+  scroll-margin-top: calc(72px + var(--app-safe-top, 0px));
 }
 
 /* ============================================
@@ -50,6 +50,7 @@
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --app-safe-top: 0px;
   --keyboard-inset-bottom: 0px;
 }
 
@@ -94,11 +95,52 @@ body,
   }
 }
 
-/* Tauri 原生 app：原生 MainActivity.kt 通过 setPadding 处理 safe-area 和键盘。
+/* Tauri 原生 app：MainActivity.kt 只处理底部键盘/导航栏，顶部由 Web surface 自己绘制。
  * 用更高优先级 (.tauri-app + #root) 显式 padding:0 覆盖上面的 #root 规则，
  * 防止 CSS env() 与原生 setPadding 双重叠加。 */
 .tauri-app #root {
   padding: 0;
+}
+
+.tauri-app {
+  --app-safe-top: var(--safe-area-inset-top);
+}
+
+.mobile-safe-topbar-14 {
+  box-sizing: border-box;
+  height: calc(3.5rem + var(--app-safe-top, 0px));
+  padding-top: var(--app-safe-top, 0px);
+}
+
+.mobile-safe-topbar-10 {
+  box-sizing: border-box;
+  height: calc(2.5rem + var(--app-safe-top, 0px));
+  padding-top: var(--app-safe-top, 0px);
+}
+
+.mobile-chat-top-spacer {
+  height: calc(5rem + var(--app-safe-top, 0px));
+}
+
+.modal-shell-safe-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100% - var(--app-safe-top, 0px));
+  margin-top: var(--app-safe-top, 0px);
+}
+
+.dialog-safe-region {
+  top: calc(var(--desktop-titlebar-height, 0px) + var(--app-safe-top, 0px));
+}
+
+.toast-safe-top {
+  top: calc(var(--app-safe-top, 0px) + 0.75rem);
+}
+
+.command-palette-safe-top {
+  padding-top: calc(var(--app-safe-top, 0px) + 15vh);
 }
 
 /* ============================================

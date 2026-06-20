@@ -42,20 +42,23 @@ class MainActivity : TauriActivity() {
     }
 
     // 监听 WindowInsets 变化：
-    // 1. 对内容容器 setPadding，让 WebView 物理 resize（键盘弹出时 window.innerHeight 自动变小）
-    // 2. 系统栏本身保持透明，decorView 用页面背景色补齐状态栏背后区域
+    // 1. 顶部交给 Web surface 自己绘制，状态栏透明叠在 WebView 上
+    // 2. 底部仍由原生 padding 处理，让键盘弹出时 WebView 物理 resize
     val contentView = findViewById<View>(android.R.id.content)
     ViewCompat.setOnApplyWindowInsetsListener(contentView) { view, windowInsets ->
       val systemInsets = windowInsets.getInsets(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
       )
       val imeInsets = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
+      val statusBarInsets = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
+      val density = resources.displayMetrics.density
+      val topInsetCssPx = maxOf(statusBarInsets.top, systemInsets.top) / density
 
       // 键盘弹出时底部取 IME 和系统栏的较大值，让 WebView 整体 resize
       val bottomPadding = maxOf(imeInsets.bottom, systemInsets.bottom)
       view.setPadding(
         systemInsets.left,
-        systemInsets.top,
+        0,
         systemInsets.right,
         bottomPadding
       )
@@ -63,7 +66,7 @@ class MainActivity : TauriActivity() {
       cachedInsetsJs = """
         (function() {
           var s = document.documentElement.style;
-          s.setProperty('--safe-area-inset-top', '0px');
+          s.setProperty('--safe-area-inset-top', '${topInsetCssPx}px');
           s.setProperty('--safe-area-inset-bottom', '0px');
           s.setProperty('--safe-area-inset-left', '0px');
           s.setProperty('--safe-area-inset-right', '0px');

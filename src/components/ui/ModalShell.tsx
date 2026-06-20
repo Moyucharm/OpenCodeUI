@@ -7,7 +7,7 @@
  * - useDelayedRender 控制 mount/unmount
  * - 淡入/淡出动画（仅 opacity）
  *
- * 不管背景色、不管遮罩 — 这些由 children 自行决定。
+ * 全屏层默认使用应用背景；遮罩由 children 自行决定。
  * 容器 fixed inset-0 铺满视口。
  */
 
@@ -32,7 +32,7 @@ export const ModalShell = memo(function ModalShell({ isOpen, onClose, children, 
 
   return createPortal(
     <div
-      className="fixed inset-0 flex flex-col transition-opacity duration-200 ease-out"
+      className="fixed inset-0 flex flex-col bg-bg-100 transition-opacity duration-200 ease-out"
       style={{
         zIndex,
         opacity: isVisible ? 1 : 0,
@@ -41,7 +41,7 @@ export const ModalShell = memo(function ModalShell({ isOpen, onClose, children, 
       role="dialog"
       aria-modal="true"
     >
-      {children}
+      <div className="modal-shell-safe-content">{children}</div>
     </div>,
     document.body,
   )

@@ -189,7 +189,7 @@ export function ToastContainer({ onOpenAbout }: { onOpenAbout: () => void }) {
   return (
     <>
       <style>{`@keyframes toast-update-enter { from { opacity: 0; transform: translateY(-8px) translateX(8px); } to { opacity: 1; transform: translateY(0) translateX(0); } }`}</style>
-      <div className="absolute top-3 right-3 left-3 md:left-auto md:w-80 z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="toast-safe-top absolute right-3 left-3 md:left-auto md:w-80 z-50 flex flex-col gap-2 pointer-events-none">
       <UpdateToast onOpenAbout={onOpenAbout} />
 
       {toasts.map(item => (

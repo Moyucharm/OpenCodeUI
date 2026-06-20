@@ -872,7 +872,7 @@ export function SidePanel({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* ===== Header ===== */}
-      <div className="h-14 shrink-0 flex items-center">
+      <div className="mobile-safe-topbar-14 shrink-0 flex items-center">
         {/* Logo 区域 - 展开时显示 */}
         <div
           className="overflow-hidden transition-all duration-300 ease-out"

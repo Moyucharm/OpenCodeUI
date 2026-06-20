@@ -882,7 +882,7 @@ export const ChatArea = memo(
               </div>
             )}
 
-            <div className="h-20 shrink-0" />
+            <div className="mobile-chat-top-spacer shrink-0" />
             <div ref={topSentinelRef} className="h-px shrink-0" aria-hidden="true" />
           </div>
         </div>

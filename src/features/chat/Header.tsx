@@ -197,7 +197,7 @@ export function Header({
 
   return (
     <div
-      className={`h-14 flex justify-between items-center z-20 bg-bg-100 transition-colors duration-200 relative ${isCompact ? 'px-2' : 'px-4'}`}
+      className={`mobile-safe-topbar-14 flex justify-between items-center z-20 bg-bg-100 transition-colors duration-200 relative ${isCompact ? 'px-2' : 'px-4'}`}
     >
       <div className="flex items-center gap-2 min-w-0 shrink-1 z-20">
         {interaction.sidebarBehavior === 'overlay' && onOpenSidebar && (

@@ -299,7 +299,7 @@ export function Dialog({
       onClick={handleBackdropClick}
     >
       <div
-        className="absolute inset-x-0 bottom-0 top-[var(--desktop-titlebar-height,0px)] flex items-center justify-center p-4"
+        className="dialog-safe-region absolute inset-x-0 bottom-0 flex items-center justify-center p-4"
         onPointerDown={e => {
           handleBackdropPointerDown(e)
           e.stopPropagation()
