@@ -21,7 +21,7 @@ import { copyTextToClipboard, readTextFromClipboard } from '../utils/clipboard'
 import { keybindingStore } from '../store/keybindingStore'
 
 const TERMINAL_FONT_FALLBACK =
-  "'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'Noto Sans Mono CJK SC', 'WenQuanYi Micro Hei Mono', 'Noto Sans CJK SC', ui-monospace, monospace"
+  "'Fira Code', 'Noto Sans Mono CJK SC', 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'Noto Sans Mono', 'Ubuntu Mono', 'WenQuanYi Micro Hei Mono', 'DejaVu Sans Mono', 'Noto Sans CJK SC', ui-monospace, monospace"
 
 // ============================================
 // 终端主题 - 与应用主题配合
