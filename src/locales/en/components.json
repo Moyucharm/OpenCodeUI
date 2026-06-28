@@ -87,6 +87,7 @@
     "addServer": "Add Server",
     "loadingServers": "Loading servers...",
     "failedToLoad": "Failed to load MCP servers",
+    "failedToLoadResources": "Failed to load MCP resources",
     "noServers": "No MCP servers configured",
     "addMcpServer": "Add MCP Server",
     "local": "Local",
@@ -102,6 +103,9 @@
     "disabled": "Disabled",
     "needsAuth": "Needs Auth",
     "needsRegistration": "Needs Registration",
+    "resources": "Resources",
+    "resourceCount_one": "{{count}} resource",
+    "resourceCount_other": "{{count}} resources",
     "disconnect": "Disconnect",
     "connect": "Connect",
     "authenticate": "Authenticate"
