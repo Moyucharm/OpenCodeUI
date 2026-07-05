@@ -64,6 +64,11 @@ type LoadMoreAnchorSnapshot = {
   pageCountBefore: number
 }
 
+type LoadMoreScrollSnapshot = {
+  scrollTop: number
+  messageCountBefore: number
+}
+
 /** Stable no-op to avoid creating a new closure on every render. */
 const NOOP = () => {}
 
@@ -187,6 +192,7 @@ export const ChatArea = memo(
       const pendingScrollClearTimerRef = useRef<number | null>(null)
       const pendingAnchorClearRafRef = useRef<number | null>(null)
       const pendingSessionResetRafRef = useRef<number | null>(null)
+      const pendingLoadMoreScrollRef = useRef<LoadMoreScrollSnapshot | null>(null)
       // rAF 批处理高度更新：同帧内多次 ResizeObserver 回调合并为一次 setState
       const pendingHeightUpdatesRef = useRef<Map<string, number>>(new Map())
       const heightFlushRafRef = useRef<number | null>(null)
@@ -201,6 +207,10 @@ export const ChatArea = memo(
       const loadMoreRequestIdRef = useRef(0)
       const topSentinelVisibleRef = useRef(false)
       const lastWheelInputAtRef = useRef(0)
+      const lastUserScrollInputAtRef = useRef(0)
+      const touchStartYRef = useRef<number | null>(null)
+      const userPinnedAwayFromBottomRef = useRef(false)
+      const loadMoreNeedsUserInputRef = useRef(false)
       const tryLoadMoreRef = useRef<() => void>(NOOP)
 
       useEffect(() => {
@@ -529,7 +539,9 @@ export const ChatArea = memo(
           isAtBottomRef.current = atBottom
           if (previous !== atBottom) onAtBottomChange?.(atBottom)
 
-          if (!atBottom) loadMoreBlockedRef.current = false
+          if (!atBottom && recentlyUserScrolled && !loadMoreNeedsUserInputRef.current) {
+            loadMoreBlockedRef.current = false
+          }
           updateScrollOffsetSnapshot()
         }
 
@@ -568,8 +580,11 @@ export const ChatArea = memo(
         if (sessionId === prevSessionIdRef.current) return
         prevSessionIdRef.current = sessionId
         isAtBottomRef.current = true
+        clearUserPinnedAwayFromBottom()
+        loadMoreNeedsUserInputRef.current = false
         loadMoreBlockedRef.current = true
         pendingLoadMoreAnchorRef.current = null
+        pendingLoadMoreScrollRef.current = null
         previousActivePagesRef.current = { sessionId, pages: [] }
         lastStreamingPageKeysRef.current = new Set()
         clearPendingLoadMoreAnchorMessage()
@@ -652,10 +667,17 @@ export const ChatArea = memo(
 
         const root = scrollRef.current
         if (root) {
+          pendingLoadMoreScrollRef.current = {
+            scrollTop: root.scrollTop,
+            messageCountBefore: visibleMessages.length,
+          }
           const anchor = captureLoadMoreAnchor(root, activePages.length)
           pendingLoadMoreAnchorRef.current = anchor
           setPendingLoadMoreAnchorMessageId(anchor?.messageId ?? null)
         }
+
+        loadMoreBlockedRef.current = true
+        loadMoreNeedsUserInputRef.current = true
 
         const requestId = ++loadMoreRequestIdRef.current
         const requestSessionId = sid
@@ -666,7 +688,7 @@ export const ChatArea = memo(
           isLoadingRef.current = false
           setIsLoadingMore(false)
         })
-      }, [activePages.length, clearPendingLoadMoreTimer, sessionId])
+      }, [activePages.length, clearPendingLoadMoreTimer, sessionId, visibleMessages.length])
 
       useEffect(() => {
         tryLoadMoreRef.current = tryLoadMore
@@ -698,9 +720,38 @@ export const ChatArea = memo(
       }, [clearPendingLoadMoreTimer, tryLoadMore, visibleMessages])
 
       useLayoutEffect(() => {
+        const snapshot = pendingLoadMoreScrollRef.current
+        const root = scrollRef.current
+        if (!snapshot || !root) return
+        if (visibleMessages.length <= snapshot.messageCountBefore) return
+
+        pendingLoadMoreScrollRef.current = null
+        pendingLoadMoreAnchorRef.current = null
+        clearPendingLoadMoreAnchorMessage()
+
+        loadMoreBlockedRef.current = true
+        loadMoreNeedsUserInputRef.current = true
+
+        root.scrollTop = snapshot.scrollTop
+        scrollOffsetFromBottomRef.current = Math.abs(snapshot.scrollTop)
+        setScrollOffsetFromBottom(scrollOffsetFromBottomRef.current)
+        updateScrollOffsetSnapshot()
+      }, [clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot, visibleMessages.length])
+
+      useEffect(() => {
+        if (isLoadingMore) return
+        const snapshot = pendingLoadMoreScrollRef.current
+        if (!snapshot || visibleMessages.length > snapshot.messageCountBefore) return
+
+        pendingLoadMoreScrollRef.current = null
+        pendingLoadMoreAnchorRef.current = null
+        clearPendingLoadMoreAnchorMessage()
+      }, [clearPendingLoadMoreAnchorMessage, isLoadingMore, visibleMessages.length])
+
+      useLayoutEffect(() => {
         const anchor = pendingLoadMoreAnchorRef.current
         const root = scrollRef.current
-        if (!anchor || !root) return
+        if (!anchor || !root || pendingLoadMoreScrollRef.current) return
         if (activePages.length <= anchor.pageCountBefore) return
 
         const target = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
