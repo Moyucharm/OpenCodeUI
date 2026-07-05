@@ -88,6 +88,23 @@ function pageHasUnhydratedAssistantMessage(page: ChatPage): boolean {
   )
 }
 
+function isScrollIntentKey(key: string): boolean {
+  return (
+    key === 'ArrowUp' ||
+    key === 'ArrowDown' ||
+    key === 'PageUp' ||
+    key === 'PageDown' ||
+    key === 'Home' ||
+    key === 'End' ||
+    key === ' '
+  )
+}
+
+function isInteractiveEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest('button,a,input,textarea,select,[contenteditable="true"]')
+}
+
 function pageHasUserMessage(page: ChatPage): boolean {
   return page.rows.some(row => row.messages.some(message => message.info.role === 'user'))
 }
@@ -428,12 +445,36 @@ export const ChatArea = memo(
       }, [])
 
       const clearPendingLayoutAnchorMessage = useCallback(() => {
+        if (pendingLayoutAnchorClearTimerRef.current !== null) {
+          window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
+          pendingLayoutAnchorClearTimerRef.current = null
+        }
+        pendingLayoutAnchorRef.current = null
         if (pendingLayoutAnchorClearRafRef.current !== null) cancelAnimationFrame(pendingLayoutAnchorClearRafRef.current)
         pendingLayoutAnchorClearRafRef.current = requestAnimationFrame(() => {
           pendingLayoutAnchorClearRafRef.current = null
           setPendingLayoutAnchorMessageId(null)
         })
       }, [])
+
+      const setPendingLayoutAnchor = useCallback(
+        (anchor: LoadMoreAnchorSnapshot) => {
+          if (pendingLayoutAnchorClearRafRef.current !== null) {
+            cancelAnimationFrame(pendingLayoutAnchorClearRafRef.current)
+            pendingLayoutAnchorClearRafRef.current = null
+          }
+          pendingLayoutAnchorRef.current = anchor
+          setPendingLayoutAnchorMessageId(anchor.messageId)
+          if (pendingLayoutAnchorClearTimerRef.current !== null) {
+            window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
+          }
+          pendingLayoutAnchorClearTimerRef.current = window.setTimeout(() => {
+            pendingLayoutAnchorClearTimerRef.current = null
+            clearPendingLayoutAnchorMessage()
+          }, PENDING_LAYOUT_ANCHOR_TIMEOUT_MS)
+        },
+        [clearPendingLayoutAnchorMessage],
+      )
 
       const resetSessionViewState = useCallback(() => {
         if (pendingSessionResetRafRef.current !== null) cancelAnimationFrame(pendingSessionResetRafRef.current)
@@ -571,14 +612,28 @@ export const ChatArea = memo(
           markUserScrollInput()
         }
 
+        const onPointerDown = (event: PointerEvent) => {
+          if (event.target !== root) return
+          markUserScrollInput()
+        }
+
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (isInteractiveEventTarget(event.target)) return
+          if (isScrollIntentKey(event.key)) markUserScrollInput()
+        }
+
         root.addEventListener('scroll', onScroll, { passive: true })
         root.addEventListener('wheel', onWheel, { passive: true })
+        root.addEventListener('pointerdown', onPointerDown, { passive: true })
+        root.addEventListener('keydown', onKeyDown)
         root.addEventListener('touchstart', onTouchStart, { passive: true })
         root.addEventListener('touchmove', onTouchMove, { passive: true })
         updateScrollOffsetSnapshot()
         return () => {
           root.removeEventListener('scroll', onScroll)
           root.removeEventListener('wheel', onWheel)
+          root.removeEventListener('pointerdown', onPointerDown)
+          root.removeEventListener('keydown', onKeyDown)
           root.removeEventListener('touchstart', onTouchStart)
           root.removeEventListener('touchmove', onTouchMove)
         }
@@ -784,7 +839,10 @@ export const ChatArea = memo(
         if (!anchor || !root) return
 
         const target = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
-        if (!target) return
+        if (!target) {
+          clearPendingLayoutAnchorMessage()
+          return
+        }
 
         pendingLayoutAnchorRef.current = null
         if (pendingLayoutAnchorClearTimerRef.current !== null) {
@@ -869,10 +927,7 @@ export const ChatArea = memo(
           const root = scrollRef.current
           if (root && !isAtBottomRef.current) {
             const anchor = captureLoadMoreAnchor(root)
-            if (anchor) {
-              pendingLayoutAnchorRef.current = anchor
-              setPendingLayoutAnchorMessageId(anchor.messageId)
-            }
+            if (anchor) setPendingLayoutAnchor(anchor)
           }
           setMeasuredPageHeights(previous => {
             if (previous[pageKey] != null) {
@@ -915,18 +970,7 @@ export const ChatArea = memo(
             }
             if (needsAnchor) {
               const anchor = captureLoadMoreAnchor(root)
-              if (anchor) {
-                pendingLayoutAnchorRef.current = anchor
-                setPendingLayoutAnchorMessageId(anchor.messageId)
-                if (pendingLayoutAnchorClearTimerRef.current !== null) {
-                  window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
-                }
-                pendingLayoutAnchorClearTimerRef.current = window.setTimeout(() => {
-                  pendingLayoutAnchorClearTimerRef.current = null
-                  pendingLayoutAnchorRef.current = null
-                  setPendingLayoutAnchorMessageId(null)
-                }, PENDING_LAYOUT_ANCHOR_TIMEOUT_MS)
-              }
+              if (anchor) setPendingLayoutAnchor(anchor)
             }
           }
 
@@ -953,7 +997,7 @@ export const ChatArea = memo(
             setPremeasurePageKey(current => (current === measuredKey ? null : current))
           }
         })
-      }, [])
+      }, [setPendingLayoutAnchor])
 
       const requestScrollToMessage = useCallback(
         (messageId: string, behavior: ScrollBehavior) => {
