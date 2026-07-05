@@ -80,6 +80,14 @@ function pageHasStreamingMessage(page: ChatPage): boolean {
   )
 }
 
+function pageHasUnhydratedAssistantMessage(page: ChatPage): boolean {
+  return page.rows.some(row =>
+    row.messages.some(
+      message => message.info.role === 'assistant' && message.parts.length === 0 && !message.info.error,
+    ),
+  )
+}
+
 function pageHasUserMessage(page: ChatPage): boolean {
   return page.rows.some(row => row.messages.some(message => message.info.role === 'user'))
 }
@@ -358,6 +366,7 @@ export const ChatArea = memo(
         if (!premeasurePageKey) return null
         const page = activePages.find(candidate => candidate.key === premeasurePageKey)
         if (!page || measuredPageHeights[page.key] != null) return null
+        if (pageHasUnhydratedAssistantMessage(page)) return null
         const pageIndex = activePages.indexOf(page)
         if (pageIndex < 0 || renderPageSelection.has(pageIndex)) return null
         return page
@@ -1280,6 +1289,7 @@ const PageMeasureLayer = memo(function PageMeasureLayer({
                       <MessageRenderer
                         message={message}
                         allowStreamingLayoutAnimation={false}
+                        measureOnly
                         turnDuration={turnDurationMap.get(message.info.id)}
                         onUndo={message.info.role === 'user' ? onUndo : undefined}
                         onFork={onFork}

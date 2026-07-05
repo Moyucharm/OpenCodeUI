@@ -14,9 +14,10 @@ const ITALIC_SHOW_LEADING_GLYPH = false
 interface ReasoningPartViewProps {
   part: ReasoningPart
   isStreaming?: boolean
+  measureOnly?: boolean
 }
 
-export const ReasoningPartView = memo(function ReasoningPartView({ part, isStreaming }: ReasoningPartViewProps) {
+export const ReasoningPartView = memo(function ReasoningPartView({ part, isStreaming, measureOnly = false }: ReasoningPartViewProps) {
   const { t } = useTranslation('message')
   const { reasoningDisplayMode } = useTheme()
   const rawText = part.text || ''
@@ -25,7 +26,9 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
   const hasContent = !!rawText.trim()
 
   const displayText = rawText
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:reasoning:${part.id}`, false)
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:reasoning:${part.id}`, false, {
+    readOnly: measureOnly,
+  })
   const shouldRenderBody = useDelayedRender(expanded)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const summaryContainerRef = useRef<HTMLDivElement>(null)
@@ -55,6 +58,7 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
   }, [reasoningDisplayMode])
 
   useEffect(() => {
+    if (measureOnly) return
     let frameId: number | null = null
 
     if (isPartStreaming && hasContent) {
@@ -70,7 +74,7 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
     return () => {
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
-  }, [isPartStreaming, hasContent, setExpanded])
+  }, [hasContent, isPartStreaming, measureOnly, setExpanded])
 
   useEffect(() => {
     if (reasoningDisplayMode !== 'capsule') return

@@ -12,7 +12,7 @@ import type { ToolRendererProps, ExtractedToolData } from '../types'
 // 通用的 Input/Output 渲染逻辑
 // ============================================
 
-export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRendererProps) {
+export function DefaultRenderer({ part, data, onFullscreenChange, measureOnly }: ToolRendererProps) {
   const { t } = useTranslation('message')
   const { state, tool } = part
   const { toolCardStyle } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
@@ -45,6 +45,7 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
           defaultCollapsed={true}
           onFullscreenChange={onFullscreenChange}
           fullscreenId={`tool:${part.sessionID}:${part.messageID}:${part.id}:input`}
+          measureOnly={measureOnly}
         />
       )}
 
@@ -58,6 +59,7 @@ export function DefaultRenderer({ part, data, onFullscreenChange }: ToolRenderer
           hasOutput={hasOutput}
           compact={isCompact}
           onFullscreenChange={onFullscreenChange}
+          measureOnly={measureOnly}
           fullscreenBaseId={`tool:${part.sessionID}:${part.messageID}:${part.id}:output`}
           stateBaseKey={`message:${part.messageID}:tool:${part.id}:output`}
         />
@@ -81,6 +83,7 @@ interface OutputBlockProps {
   hasOutput: boolean
   compact?: boolean
   onFullscreenChange?: (isFullscreen: boolean) => void
+  measureOnly?: boolean
   fullscreenBaseId: string
   stateBaseKey: string
 }
@@ -93,6 +96,7 @@ function OutputBlock({
   hasOutput,
   compact,
   onFullscreenChange,
+  measureOnly,
   fullscreenBaseId,
   stateBaseKey,
 }: OutputBlockProps) {
@@ -109,6 +113,7 @@ function OutputBlock({
         compact={compact}
         onFullscreenChange={onFullscreenChange}
         fullscreenId={`${fullscreenBaseId}:error`}
+        measureOnly={measureOnly}
       />
     )
   }
@@ -125,6 +130,7 @@ function OutputBlock({
         compact={compact}
         onFullscreenChange={onFullscreenChange}
         fullscreenId={`${fullscreenBaseId}:loading`}
+        measureOnly={measureOnly}
       />
     )
   }
@@ -154,6 +160,7 @@ function OutputBlock({
               compact={compact}
               onFullscreenChange={onFullscreenChange}
               fullscreenId={`${fullscreenBaseId}:file:${file.filePath || idx}`}
+              measureOnly={measureOnly}
             />
           ))}
         </div>
@@ -175,6 +182,7 @@ function OutputBlock({
           compact={compact}
           onFullscreenChange={onFullscreenChange}
           fullscreenId={`${fullscreenBaseId}:diff`}
+          measureOnly={measureOnly}
         />
       )
     }
@@ -191,6 +199,7 @@ function OutputBlock({
         compact={compact}
         onFullscreenChange={onFullscreenChange}
         fullscreenId={`${fullscreenBaseId}:text`}
+        measureOnly={measureOnly}
       />
     )
   }
@@ -203,6 +212,7 @@ function OutputBlock({
       compact={compact}
       onFullscreenChange={onFullscreenChange}
       fullscreenId={`${fullscreenBaseId}:empty`}
+      measureOnly={measureOnly}
     />
   )
 }

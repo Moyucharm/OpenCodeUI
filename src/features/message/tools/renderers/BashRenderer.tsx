@@ -22,7 +22,7 @@ import type { ToolRendererProps } from '../types'
 // Main
 // ============================================
 
-export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererProps) {
+export function BashRenderer({ part, data, onFullscreenChange, measureOnly }: ToolRendererProps) {
   const { t } = useTranslation(['components'])
   const { state } = part
   const isActive = state.status === 'running' || state.status === 'pending'
@@ -34,15 +34,16 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
   const maxHeight = useResponsiveMaxHeight()
   const fullscreenId = `bash:${part.sessionID}:${part.messageID}:${part.id}:${part.callID}`
   const { activeId, openFullscreen, updateFullscreen, closeFullscreen } = useFullscreen()
-  const fullscreenOpen = activeId === fullscreenId
+  const fullscreenOpen = !measureOnly && activeId === fullscreenId
 
   // 全屏状态变化时通知父级，防止自动折叠
   useEffect(() => {
+    if (measureOnly) return
     onFullscreenChange?.(fullscreenOpen)
     return () => {
       if (fullscreenOpen) onFullscreenChange?.(false)
     }
-  }, [fullscreenOpen, onFullscreenChange])
+  }, [fullscreenOpen, measureOnly, onFullscreenChange])
 
   // 解析 ANSI
   const outputSegments = useMemo(() => {
@@ -95,13 +96,14 @@ export function BashRenderer({ part, data, onFullscreenChange }: ToolRendererPro
   )
 
   const handleToggleFullscreen = useCallback(() => {
+    if (measureOnly) return
     if (fullscreenOpen) {
       closeFullscreen(fullscreenId)
       return
     }
 
     openFullscreen({ id: fullscreenId, showHeader: false, content: fullscreenContent })
-  }, [closeFullscreen, fullscreenContent, fullscreenId, fullscreenOpen, openFullscreen])
+  }, [closeFullscreen, fullscreenContent, fullscreenId, fullscreenOpen, measureOnly, openFullscreen])
 
   useEffect(() => {
     if (!fullscreenOpen) return

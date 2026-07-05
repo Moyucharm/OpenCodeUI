@@ -41,6 +41,8 @@ interface ToolPartViewProps {
   descriptive?: boolean
   /** Parent assistant message is still streaming. */
   isStreaming?: boolean
+  /** Hidden measurement render: keep markup, skip UI state writes/timers. */
+  measureOnly?: boolean
 }
 
 export const ToolPartView = memo(function ToolPartView({
@@ -50,6 +52,7 @@ export const ToolPartView = memo(function ToolPartView({
   compact = false,
   descriptive = false,
   isStreaming = false,
+  measureOnly = false,
 }: ToolPartViewProps) {
   const { t } = useTranslation('message')
   const { state, tool: toolName } = part
@@ -57,9 +60,9 @@ export const ToolPartView = memo(function ToolPartView({
 
   const isActive = state.status === 'running' || state.status === 'pending'
   const isError = state.status === 'error'
-  const now = useNow(250, isActive)
+  const now = useNow(250, isActive && !measureOnly)
   const startTime = state.time?.start
-  const calibratedNow = isActive ? serverStore.getActiveCalibratedNow() : undefined
+  const calibratedNow = isActive && !measureOnly ? serverStore.getActiveCalibratedNow() : undefined
   const endTime = state.time?.end ?? (isActive ? (calibratedNow ?? now) : undefined)
   const rawDuration = startTime !== undefined && endTime !== undefined ? endTime - startTime : undefined
   const duration = rawDuration !== undefined && isActive ? Math.max(0, rawDuration) : rawDuration
@@ -82,6 +85,7 @@ export const ToolPartView = memo(function ToolPartView({
   // 在工具完成之前继续渲染（以 resolved 状态）
   const [cachedPermissionRequest, setCachedPermissionRequest] = useState(permissionRequest)
   useEffect(() => {
+    if (measureOnly) return
     let frameId: number | null = null
 
     if (permissionRequest) {
@@ -97,7 +101,7 @@ export const ToolPartView = memo(function ToolPartView({
     return () => {
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
-  }, [permissionRequest, toolDone])
+  }, [measureOnly, permissionRequest, toolDone])
 
   const effectivePermissionRequest = permissionRequest || cachedPermissionRequest
   const isFilePermission =
@@ -125,6 +129,7 @@ export const ToolPartView = memo(function ToolPartView({
   const [expanded, setExpanded] = useUiDisclosureState(
     `message:${part.messageID}:tool:${part.id}`,
     shouldStartExpanded,
+    { readOnly: measureOnly },
   )
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)
   const [isChildFullscreen, setIsChildFullscreen] = useState(false)
@@ -132,6 +137,7 @@ export const ToolPartView = memo(function ToolPartView({
   const shouldRenderBody = useDelayedRender(effectiveExpanded)
 
   useEffect(() => {
+    if (measureOnly) return
     let frameId: number | null = null
 
     if (isActive || hasPendingInteraction || permissionResolved) {
@@ -163,6 +169,7 @@ export const ToolPartView = memo(function ToolPartView({
     descriptive,
     isStreaming,
     isReadable,
+    measureOnly,
     setExpanded,
   ])
 
@@ -193,7 +200,7 @@ export const ToolPartView = memo(function ToolPartView({
   const bodyContent = (
     <>
       {!hideToolBodyForPermission && (
-        <ToolBody part={part} data={toolData} onFullscreenChange={handleFullscreenChange} />
+        <ToolBody part={part} data={toolData} onFullscreenChange={handleFullscreenChange} measureOnly={measureOnly} />
       )}
       {displayPermission && (
         <div className={hideToolBodyForPermission && !permissionContentHidden ? '' : 'pt-2'}>
@@ -519,29 +526,31 @@ const ToolBody = memo(function ToolBody({
   part,
   data,
   onFullscreenChange,
+  measureOnly,
 }: {
   part: ToolPart
   data: ReturnType<typeof extractToolData>
   onFullscreenChange?: (isFullscreen: boolean) => void
+  measureOnly?: boolean
 }) {
   const { tool } = part
   const lowerTool = tool.toLowerCase()
 
   if (lowerTool === 'task') {
-    return <TaskRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+    return <TaskRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} measureOnly={measureOnly} />
   }
 
   if (lowerTool.includes('todo') && hasTodos(part)) {
-    return <TodoRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+    return <TodoRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} measureOnly={measureOnly} />
   }
 
   const config = getToolConfig(tool)
   if (config?.renderer) {
     const CustomRenderer = config.renderer
-    return <CustomRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+    return <CustomRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} measureOnly={measureOnly} />
   }
 
-  return <DefaultRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} />
+  return <DefaultRenderer part={part} data={data} onFullscreenChange={onFullscreenChange} measureOnly={measureOnly} />
 })
 
 function getTaskChildSessionId(part: ToolPart): string | undefined {

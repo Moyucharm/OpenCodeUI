@@ -20,23 +20,23 @@ interface TodoItem {
 // Todo Renderer
 // ============================================
 
-export function TodoRenderer({ part }: ToolRendererProps) {
+export function TodoRenderer({ part, measureOnly }: ToolRendererProps) {
   const todos = extractTodos(part)
 
   if (todos.length === 0) {
     return null
   }
 
-  return <TodoList todos={todos} stateKey={`message:${part.messageID}:tool:${part.id}:todo-list`} />
+  return <TodoList todos={todos} stateKey={`message:${part.messageID}:tool:${part.id}:todo-list`} measureOnly={measureOnly} />
 }
 
 // ============================================
 // TodoList Component
 // ============================================
 
-function TodoList({ todos, stateKey }: { todos: TodoItem[]; stateKey: string }) {
+function TodoList({ todos, stateKey, measureOnly }: { todos: TodoItem[]; stateKey: string; measureOnly?: boolean }) {
   const { t } = useTranslation('message')
-  const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false)
+  const [collapsed, setCollapsed] = useUiDisclosureState(stateKey, false, { readOnly: measureOnly })
   const shouldRenderBody = useDelayedRender(!collapsed)
   const completed = todos.filter(t => t.status === 'completed').length
   const total = todos.length

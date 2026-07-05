@@ -23,6 +23,10 @@ export function hasUserTouchedUiDisclosure(key: string): boolean {
   return disclosureStateCache.get(key)?.touched ?? false
 }
 
+function peekUiDisclosureState(key: string, fallback: boolean): DisclosureState {
+  return disclosureStateCache.get(key) ?? { value: fallback, touched: false }
+}
+
 const uiStateCache = new Map<string, unknown>()
 
 export function getUiState<T>(key: string, fallback: T): T {
@@ -56,24 +60,26 @@ export function useUiState<T>(key: string | undefined, fallback: T) {
   return [state, setValue] as const
 }
 
-export function useUiDisclosureState(key: string, fallback: boolean) {
-  const [cached, setCached] = useState(() => ({ key, state: getUiDisclosureState(key, fallback) }))
-  const state = cached.key === key ? cached.state : getUiDisclosureState(key, fallback)
+export function useUiDisclosureState(key: string, fallback: boolean, options?: { readOnly?: boolean }) {
+  const readOnly = options?.readOnly ?? false
+  const readState = readOnly ? peekUiDisclosureState : getUiDisclosureState
+  const [cached, setCached] = useState(() => ({ key, state: readState(key, fallback) }))
+  const state = cached.key === key ? cached.state : readState(key, fallback)
 
   const setValue = useCallback(
     (next: boolean | ((prev: boolean) => boolean), options?: { touched?: boolean; respectUser?: boolean }) => {
       setCached(prev => {
-        const previousState = prev.key === key ? prev.state : getUiDisclosureState(key, fallback)
+        const previousState = prev.key === key ? prev.state : readState(key, fallback)
         if (options?.respectUser && previousState.touched) return prev.key === key ? prev : { key, state: previousState }
         const resolved =
           typeof next === 'function' ? (next as (prev: boolean) => boolean)(previousState.value) : next
         const touched = options?.touched ?? true
         const nextState = { value: resolved, touched: previousState.touched || touched }
-        disclosureStateCache.set(key, nextState)
+        if (!readOnly) disclosureStateCache.set(key, nextState)
         return { key, state: nextState }
       })
     },
-    [fallback, key],
+    [fallback, key, readOnly, readState],
   )
 
   return [state.value, setValue, state.touched] as const
