@@ -34,6 +34,15 @@
   scroll-margin-top: calc(72px + var(--app-safe-top, 0px));
 }
 
+@keyframes slideRight {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
 /* ============================================
  * Mobile Viewport & Safe Area
  * ============================================ */

@@ -26,6 +26,7 @@ export type KeybindingAction =
   // Model
   | 'selectModel'
   | 'toggleAgent'
+  | 'toggleVariant'
   // Message
   | 'sendMessage'
   | 'cancelMessage'
@@ -53,6 +54,8 @@ export interface KeybindingConfig {
   scope: 'global' | 'terminal'
 }
 
+export type KeybindingPreset = 'web' | 'tui'
+
 /**
  * 解析后的快捷键
  */
@@ -67,6 +70,7 @@ export interface ParsedKeybinding {
 type Listener = () => void
 
 const STORAGE_KEY = 'opencode-keybindings'
+const STORAGE_KEY_PRESET = 'opencode-keybinding-preset'
 
 /**
  * 默认快捷键配置
@@ -229,6 +233,15 @@ const DEFAULT_KEYBINDINGS: KeybindingConfig[] = [
     category: 'model',
     scope: 'global',
   },
+  {
+    action: 'toggleVariant',
+    label: 'Toggle Thinking Effort',
+    description: 'Cycle model thinking effort or variant',
+    defaultKey: 'Alt+Shift+M',
+    currentKey: 'Alt+Shift+M',
+    category: 'model',
+    scope: 'global',
+  },
 
   // Message
   {
@@ -326,6 +339,24 @@ const DEFAULT_KEYBINDINGS: KeybindingConfig[] = [
     scope: 'global',
   },
 ]
+
+const TUI_KEYBINDING_OVERRIDES: Partial<Record<KeybindingAction, string>> = {
+  commandPalette: 'Ctrl+P',
+  toggleAgent: 'Tab',
+  toggleVariant: 'Ctrl+T',
+  sendMessage: 'Enter',
+  cancelMessage: 'Escape',
+}
+
+function getPresetDefaultKey(action: KeybindingAction, preset: KeybindingPreset): string {
+  const webDefault = DEFAULT_KEYBINDINGS.find(kb => kb.action === action)?.defaultKey ?? ''
+  if (preset === 'tui') return TUI_KEYBINDING_OVERRIDES[action] ?? webDefault
+  return webDefault
+}
+
+function normalizePreset(value: string | null): KeybindingPreset {
+  return value === 'tui' ? 'tui' : 'web'
+}
 
 /**
  * 规范化按键名称 - 处理各种别名和大小写
@@ -592,6 +623,8 @@ export interface KeybindingBackup {
 class KeybindingStore {
   private keybindings: KeybindingConfig[] = []
   private listeners: Set<Listener> = new Set()
+  private preset: KeybindingPreset = 'web'
+  private customActions: Set<KeybindingAction> = new Set()
 
   // 快照缓存 (用于 useSyncExternalStore)
   private _snapshot: KeybindingConfig[] = []
@@ -606,14 +639,24 @@ class KeybindingStore {
   // ============================================
 
   private loadFromStorage(): void {
+    this.preset = normalizePreset(localStorage.getItem(STORAGE_KEY_PRESET))
+
     // 先加载默认配置
-    this.keybindings = DEFAULT_KEYBINDINGS.map(kb => ({ ...kb }))
+    this.keybindings = DEFAULT_KEYBINDINGS.map(kb => {
+      const defaultKey = getPresetDefaultKey(kb.action, this.preset)
+      return { ...kb, defaultKey, currentKey: defaultKey }
+    })
 
     // 然后应用用户自定义
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const customKeys: Record<string, string> = JSON.parse(stored)
+        this.customActions = new Set(
+          Object.keys(customKeys).filter((action): action is KeybindingAction =>
+            DEFAULT_KEYBINDINGS.some(kb => kb.action === action),
+          ),
+        )
         for (const kb of this.keybindings) {
           if (customKeys[kb.action]) {
             kb.currentKey = customKeys[kb.action]
@@ -630,7 +673,7 @@ class KeybindingStore {
       // 只保存与默认不同的配置
       const customKeys: Record<string, string> = {}
       for (const kb of this.keybindings) {
-        if (kb.currentKey !== kb.defaultKey) {
+        if (this.customActions.has(kb.action)) {
           customKeys[kb.action] = kb.currentKey
         }
       }
@@ -667,6 +710,10 @@ class KeybindingStore {
    */
   getAll(): KeybindingConfig[] {
     return this._snapshot
+  }
+
+  getPreset(): KeybindingPreset {
+    return this.preset
   }
 
   /**
@@ -731,9 +778,41 @@ class KeybindingStore {
     if (!kb) return false
 
     kb.currentKey = newKey
+    this.customActions.add(action)
     this.saveToStorage()
     this.notify()
     return true
+  }
+
+  setPreset(preset: KeybindingPreset): void {
+    if (this.preset === preset) return
+    const previousPreset = this.preset
+
+    for (const kb of this.keybindings) {
+      const previousDefault = getPresetDefaultKey(kb.action, previousPreset)
+      const nextDefault = getPresetDefaultKey(kb.action, preset)
+      const isCustom = this.customActions.has(kb.action)
+      const followsPreviousPreset = !isCustom && keybindingsEqual(kb.currentKey, previousDefault)
+      const collidesWithCustom = this.keybindings.some(
+        other =>
+          other.action !== kb.action &&
+          other.scope === kb.scope &&
+          this.customActions.has(other.action) &&
+          keybindingsEqual(other.currentKey, nextDefault),
+      )
+
+      kb.defaultKey = nextDefault
+      if (followsPreviousPreset && !collidesWithCustom) {
+        kb.currentKey = nextDefault
+      } else if (followsPreviousPreset && collidesWithCustom) {
+        this.customActions.add(kb.action)
+      }
+    }
+
+    this.preset = preset
+    localStorage.setItem(STORAGE_KEY_PRESET, preset)
+    this.saveToStorage()
+    this.notify()
   }
 
   /**
@@ -744,6 +823,7 @@ class KeybindingStore {
     if (!kb) return false
 
     kb.currentKey = kb.defaultKey
+    this.customActions.delete(action)
     this.saveToStorage()
     this.notify()
     return true
@@ -756,6 +836,7 @@ class KeybindingStore {
     for (const kb of this.keybindings) {
       kb.currentKey = kb.defaultKey
     }
+    this.customActions.clear()
     this.saveToStorage()
     this.notify()
   }
@@ -765,13 +846,16 @@ class KeybindingStore {
 export const keybindingStore = new KeybindingStore()
 
 export function exportKeybindingBackup(): KeybindingBackup {
-  const customKeys: Record<string, string> = {}
-  for (const keybinding of keybindingStore.getAll()) {
-    if (keybinding.currentKey !== keybinding.defaultKey) {
-      customKeys[keybinding.action] = keybinding.currentKey
-    }
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) return { customKeys: {} }
+
+  try {
+    const customKeys = JSON.parse(stored)
+    if (!customKeys || typeof customKeys !== 'object') return { customKeys: {} }
+    return { customKeys: customKeys as Record<string, string> }
+  } catch {
+    return { customKeys: {} }
   }
-  return { customKeys }
 }
 
 export function importKeybindingBackup(raw: unknown): void {

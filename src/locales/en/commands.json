@@ -33,6 +33,8 @@
   "selectModelDesc": "Open model selector",
   "toggleAgent": "Toggle Agent",
   "toggleAgentDesc": "Switch agent mode",
+  "toggleVariant": "Toggle Thinking Effort",
+  "toggleVariantDesc": "Cycle model thinking effort or variant",
   "sendMessage": "Send Message",
   "sendMessageDesc": "Send current message",
   "copyLastResponse": "Copy Last Response",

@@ -37,6 +37,10 @@ export function useKeybindingStore() {
     keybindingStore.resetAll()
   }, [])
 
+  const setPreset = useCallback((preset: import('../store/keybindingStore').KeybindingPreset) => {
+    keybindingStore.setPreset(preset)
+  }, [])
+
   const getKey = useCallback((action: KeybindingAction) => {
     return keybindingStore.getKey(action)
   }, [])
@@ -54,6 +58,8 @@ export function useKeybindingStore() {
     setKeybinding,
     resetKeybinding,
     resetAll,
+    preset: keybindingStore.getPreset(),
+    setPreset,
     getKey,
     isKeyUsed,
     getByCategory,

@@ -92,6 +92,8 @@
     "collapseLongMessagesDesc": "Auto-collapse lengthy user messages",
     "renderUserMarkdown": "Render User Markdown",
     "renderUserMarkdownDesc": "Render sent user messages as Markdown when enabled; keep plain text when disabled",
+    "ideographicCommaSlashCommand": "Use 、 for / Commands",
+    "ideographicCommaSlashCommandDesc": "When the input is empty, typing 、 is replaced with / to open the command menu from Chinese IMEs",
     "outlineCurrentHighlight": "Highlight Current Position",
     "outlineCurrentHighlightDesc": "Mark the user prompt that owns the current viewport in the right-side history rail",
     "descriptiveToolSteps": "Descriptive Steps",
@@ -392,6 +394,8 @@
     "alreadyInUse": "Already in use",
     "resetToDefault": "Reset to default",
     "clickToRebind": "Click a shortcut to rebind. Enter confirm, Esc cancel.",
+    "useTuiDefaults": "Use TUI Defaults",
+    "useTuiDefaultsDesc": "Applies only to shortcuts you have not customized. Tab cycles agents and Ctrl+T cycles thinking effort. Some browser-reserved keys may not be available.",
     "categories": {
       "general": "General",
       "session": "Session",

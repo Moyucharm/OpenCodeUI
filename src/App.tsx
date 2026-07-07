@@ -9,12 +9,11 @@ import { ToastContainer } from './components/ToastContainer'
 import { RightPanel } from './components/RightPanel'
 import { BottomPanel } from './components/BottomPanel'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
-import { useDirectory, useGlobalEvents, useGlobalKeybindings, useRouter } from './hooks'
+import { useDirectory, useGlobalEvents, useGlobalKeybindings, useKeybindingStore, useRouter } from './hooks'
 import { useViewportHeight } from './hooks/useViewportHeight'
 import { useCloseServiceDialog } from './hooks/useCloseServiceDialog'
 import { useWakeLock } from './hooks/useWakeLock'
 import type { KeybindingHandlers } from './hooks/useKeybindings'
-import { keybindingStore } from './store/keybindingStore'
 import {
   layoutStore,
   paneLayoutStore,
@@ -65,6 +64,7 @@ function App() {
   } = router
   const { currentDirectory, savedDirectories, sidebarExpanded, setSidebarExpanded } = useDirectory()
   const { rightPanelOpen, rightPanelWidth, wakeLock } = useLayoutStore()
+  const { keybindings: keybindingSnapshot } = useKeybindingStore()
   const { surfaceRef, value: chatViewport } = useChatViewportController({
     sidebarExpanded,
     rightPanelOpen,
@@ -556,6 +556,7 @@ function App() {
       newTerminal: handleNewTerminal,
       selectModel: () => focusedController?.openModelSelector(),
       toggleAgent: () => focusedController?.toggleAgent(),
+      toggleVariant: () => focusedController?.toggleVariant(),
       cancelMessage: () => focusedController?.cancelMessage(),
       copyLastResponse: () => focusedController?.copyLastResponse(),
       toggleFullAuto: () => focusedController?.toggleFullAuto(),
@@ -614,7 +615,7 @@ function App() {
 
   const commands = useMemo<CommandItem[]>(() => {
     const getShortcut = (action: string) =>
-      keybindingStore.getKey(action as import('./store/keybindingStore').KeybindingAction)
+      keybindingSnapshot.find(kb => kb.action === action)?.currentKey ?? ''
 
     return [
       {
@@ -734,6 +735,14 @@ function App() {
         action: () => focusedController?.toggleAgent(),
       },
       {
+        id: 'toggleVariant',
+        label: t('commands:toggleVariant'),
+        description: t('commands:toggleVariantDesc'),
+        category: t('commands:categories.model'),
+        shortcut: getShortcut('toggleVariant'),
+        action: () => focusedController?.toggleVariant(),
+      },
+      {
         id: 'copyLastResponse',
         label: t('commands:copyLastResponse'),
         description: t('commands:copyLastResponseDesc'),
@@ -822,6 +831,7 @@ function App() {
     handleToggleRightPanel,
     focusedController,
     handleNewTerminal,
+    keybindingSnapshot,
     paneLayout.focusedPaneId,
     paneLayout.isSplit,
     splitPaneEnabled,

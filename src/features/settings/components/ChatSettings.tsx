@@ -16,6 +16,8 @@ export function ChatSettings() {
     setOutlineCurrentHighlight,
     renderUserMarkdown,
     setRenderUserMarkdown,
+    ideographicCommaSlashCommand,
+    setIdeographicCommaSlashCommand,
   } = useTheme()
   const [collapseUserMessages, setCollapseUserMessages] = useState(themeStore.collapseUserMessages)
   const [stepFinishDisplay, setStepFinishDisplay] = useState(themeStore.stepFinishDisplay)
@@ -46,6 +48,10 @@ export function ChatSettings() {
 
   const handleOutlineHighlightToggle = () => {
     setOutlineCurrentHighlight(!outlineCurrentHighlight)
+  }
+
+  const handleIdeographicCommaSlashCommandToggle = () => {
+    setIdeographicCommaSlashCommand(!ideographicCommaSlashCommand)
   }
 
   return (
@@ -98,6 +104,14 @@ export function ChatSettings() {
           onClick={handleRenderUserMarkdownToggle}
         >
           <Toggle enabled={renderUserMarkdown} onChange={handleRenderUserMarkdownToggle} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('chat.ideographicCommaSlashCommand')}
+          description={t('chat.ideographicCommaSlashCommandDesc')}
+          onClick={handleIdeographicCommaSlashCommandToggle}
+        >
+          <Toggle enabled={ideographicCommaSlashCommand} onChange={handleIdeographicCommaSlashCommandToggle} />
         </SettingRow>
 
         <SettingRow

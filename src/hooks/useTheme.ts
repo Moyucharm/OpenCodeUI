@@ -226,6 +226,10 @@ export function useTheme() {
     themeStore.setOutlineCurrentHighlight(enabled)
   }, [])
 
+  const setIdeographicCommaSlashCommand = useCallback((enabled: boolean) => {
+    themeStore.setIdeographicCommaSlashCommand(enabled)
+  }, [])
+
   return {
     // 日夜模式（向后兼容）
     mode: state.colorMode,
@@ -328,5 +332,9 @@ export function useTheme() {
     // 对话历史导航当前位置高亮
     outlineCurrentHighlight: state.outlineCurrentHighlight,
     setOutlineCurrentHighlight,
+
+    // 中文输入法顿号唤起指令
+    ideographicCommaSlashCommand: state.ideographicCommaSlashCommand,
+    setIdeographicCommaSlashCommand,
   }
 }

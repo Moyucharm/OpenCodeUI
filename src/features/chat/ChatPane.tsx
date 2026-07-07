@@ -31,6 +31,8 @@ import type { Attachment } from '../../api'
 import type { MessageError } from '../../types/message'
 import { getInternalDragSnapshot, subscribeInternalDrag, subscribeInternalDrop } from '../../lib/internalDragCore'
 import { ErrorBoundary } from '../../components/ErrorBoundary'
+import { WorkingStatusBar } from './WorkingStatusBar'
+import { getWorkingStatus } from './workingStatus'
 
 interface ChatPaneProps {
   paneId: string
@@ -255,6 +257,7 @@ export const ChatPane = memo(function ChatPane({
     selectedAgent,
     setSelectedAgent,
     routeSessionId,
+    routeStatus,
     loadState,
     loadError,
     hasMoreHistory,
@@ -420,6 +423,15 @@ export const ChatPane = memo(function ChatPane({
     const nextIndex = (currentIndex + 1) % primaryAgents.length
     handleAgentChange(primaryAgents[nextIndex].name)
   }, [agents, selectedAgent, handleAgentChange])
+
+  const currentVariants = useMemo(() => currentModel?.variants ?? [], [currentModel?.variants])
+
+  const handleToggleVariant = useCallback(() => {
+    if (currentVariants.length === 0) return
+    const currentPosition = selectedVariant ? currentVariants.indexOf(selectedVariant) + 1 : 0
+    const nextPosition = (currentPosition + 1) % (currentVariants.length + 1)
+    handleVariantChange(nextPosition === 0 ? undefined : currentVariants[nextPosition - 1])
+  }, [currentVariants, handleVariantChange, selectedVariant])
 
   // ============================================
   // Model Restoration Effect
@@ -646,6 +658,7 @@ export const ChatPane = memo(function ChatPane({
     previousSession: handlePreviousSession,
     nextSession: handleNextSession,
     toggleAgent: handleToggleAgentWithSync,
+    toggleVariant: handleToggleVariant,
     copyLastResponse: handleCopyLastResponse,
     cancelMessage: handleCancelMessage,
     openModelSelector,
@@ -659,6 +672,7 @@ export const ChatPane = memo(function ChatPane({
       previousSession: handlePreviousSession,
       nextSession: handleNextSession,
       toggleAgent: handleToggleAgentWithSync,
+      toggleVariant: handleToggleVariant,
       copyLastResponse: handleCopyLastResponse,
       cancelMessage: handleCancelMessage,
       openModelSelector,
@@ -670,6 +684,7 @@ export const ChatPane = memo(function ChatPane({
     handlePreviousSession,
     handleNextSession,
     handleToggleAgentWithSync,
+    handleToggleVariant,
     handleCopyLastResponse,
     handleCancelMessage,
     openModelSelector,
@@ -683,6 +698,7 @@ export const ChatPane = memo(function ChatPane({
       previousSession: () => controllerActionsRef.current.previousSession(),
       nextSession: () => controllerActionsRef.current.nextSession(),
       toggleAgent: () => controllerActionsRef.current.toggleAgent(),
+      toggleVariant: () => controllerActionsRef.current.toggleVariant(),
       copyLastResponse: () => controllerActionsRef.current.copyLastResponse(),
       cancelMessage: () => controllerActionsRef.current.cancelMessage(),
       openModelSelector: () => controllerActionsRef.current.openModelSelector(),
@@ -708,6 +724,7 @@ export const ChatPane = memo(function ChatPane({
       previousSession: stableControllerActions.previousSession,
       nextSession: stableControllerActions.nextSession,
       toggleAgent: stableControllerActions.toggleAgent,
+      toggleVariant: stableControllerActions.toggleVariant,
       copyLastResponse: stableControllerActions.copyLastResponse,
       cancelMessage: stableControllerActions.cancelMessage,
       openModelSelector: stableControllerActions.openModelSelector,
@@ -761,7 +778,19 @@ export const ChatPane = memo(function ChatPane({
         text: inputRestoreContent.text,
         attachments: inputRestoreContent.attachments as Attachment[],
       }
-    : undefined
+      : undefined
+
+  const workingStatus = useMemo(
+    () =>
+      getWorkingStatus({
+        isStreaming,
+        messages,
+        routeStatus,
+        pendingPermissionRequests,
+        pendingQuestionRequests,
+      }),
+    [isStreaming, messages, pendingPermissionRequests, pendingQuestionRequests, routeStatus],
+  )
 
   // ============================================
   // Render
@@ -828,9 +857,10 @@ export const ChatPane = memo(function ChatPane({
       />
 
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-        {(showCancelHint || (fullAutoHint && !showCancelHint)) && (
+        {(showCancelHint || (fullAutoHint && !showCancelHint) || workingStatus) && (
           <div className="absolute bottom-full inset-x-0 flex justify-center pb-2 pointer-events-none z-20">
-            <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
+            {showCancelHint || (fullAutoHint && !showCancelHint) ? (
+              <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
               {showCancelHint ? (
                 <Trans
                   i18nKey="chat:hints.pressEscAgain"
@@ -843,7 +873,12 @@ export const ChatPane = memo(function ChatPane({
               ) : (
                 fullAutoHint
               )}
-            </div>
+              </div>
+            ) : workingStatus ? (
+              <div className="w-full max-w-2xl px-4 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <WorkingStatusBar status={workingStatus} />
+              </div>
+            ) : null}
           </div>
         )}
         <InputBox
@@ -857,7 +892,7 @@ export const ChatPane = memo(function ChatPane({
           agents={agents}
           selectedAgent={selectedAgent}
           onAgentChange={handleAgentChange}
-          variants={currentModel?.variants ?? []}
+          variants={currentVariants}
           selectedVariant={selectedVariant}
           onVariantChange={handleVariantChange}
           fileCapabilities={

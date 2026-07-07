@@ -1149,6 +1149,7 @@ export function useChatSession({
     selectedAgent,
     setSelectedAgent,
     routeSessionId,
+    routeStatus,
     effectiveDirectory,
 
     // Permissions

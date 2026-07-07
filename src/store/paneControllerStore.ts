@@ -11,6 +11,7 @@ export interface PaneControllerState {
   previousSession: () => void
   nextSession: () => void
   toggleAgent: () => void
+  toggleVariant: () => void
   copyLastResponse: () => void
   cancelMessage: () => void
   openModelSelector: () => void
@@ -32,6 +33,7 @@ function isSameController(a: PaneControllerState | undefined, b: PaneControllerS
     a.previousSession === b.previousSession &&
     a.nextSession === b.nextSession &&
     a.toggleAgent === b.toggleAgent &&
+    a.toggleVariant === b.toggleVariant &&
     a.copyLastResponse === b.copyLastResponse &&
     a.cancelMessage === b.cancelMessage &&
     a.openModelSelector === b.openModelSelector &&

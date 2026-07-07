@@ -46,4 +46,19 @@ describe('SlashCommandMenu', () => {
     expect(screen.getByText('/compact')).toBeInTheDocument()
     expect(screen.queryByText('/explain')).not.toBeInTheDocument()
   })
+
+  it('labels Enter as selecting the highlighted command', async () => {
+    render(
+      <div>
+        <SlashCommandMenu isOpen={true} query="" onSelect={vi.fn()} onClose={vi.fn()} rootPath="/workspace/project" />
+      </div>,
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(32)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('↵ select')).toBeInTheDocument()
+  })
 })

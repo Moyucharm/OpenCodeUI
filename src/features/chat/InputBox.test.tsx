@@ -2,17 +2,31 @@ import { forwardRef, useImperativeHandle, type ForwardedRef } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBox } from './InputBox'
+import { themeStore } from '../../store/themeStore'
 import type { Command } from '../../api/command'
 import type { Message } from '../../types/message'
 
 let slashCommands: Command[] = []
 let messagesMock: Message[] = []
+let keybindingMap: Record<string, string | null> = {}
 
 function createHistoryMessage(text: string): Message {
   return {
     info: { role: 'user' },
     parts: [{ type: 'text', text, synthetic: false }],
   } as unknown as Message
+}
+
+function fireBeforeInput(element: HTMLElement, data: string) {
+  return fireEvent(
+    element,
+    new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      data,
+      inputType: 'insertText',
+    }),
+  )
 }
 
 vi.mock('../attachment', () => ({
@@ -100,15 +114,22 @@ vi.mock('../../store/messageStoreHooks', () => ({
 
 vi.mock('../../store/keybindingStore', () => ({
   keybindingStore: {
-    getKey: (action: string) => (action === 'sendMessage' ? 'Enter' : null),
+    getKey: (action: string) => keybindingMap[action] ?? null,
   },
-  matchesKeybinding: (event: KeyboardEvent, key: string) => key === 'Enter' && event.key === 'Enter',
+  matchesKeybinding: (event: KeyboardEvent, key: string) => {
+    if (key === 'Enter') return event.key === 'Enter' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+    if (key === 'Tab') return event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+    if (key === 'Ctrl+T') return event.key.toLowerCase() === 't' && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+    return false
+  },
 }))
 
 describe('InputBox slash command selection', () => {
   beforeEach(() => {
     slashCommands = []
     messagesMock = []
+    keybindingMap = { sendMessage: 'Enter' }
+    themeStore.setIdeographicCommaSlashCommand(true)
   })
 
   it('executes frontend commands immediately on selection', async () => {
@@ -141,6 +162,112 @@ describe('InputBox slash command selection', () => {
       expect(onCommand).not.toHaveBeenCalled()
       expect(textarea.value).toBe('/review ')
     })
+  })
+
+  it('replaces an empty ideographic comma input with only slash and opens commands', async () => {
+    slashCommands = [{ name: 'help', description: 'Show help', source: 'api' }]
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireBeforeInput(textarea, '、')
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('/')
+      expect(screen.getByRole('button', { name: 'help' })).toBeInTheDocument()
+    })
+  })
+
+  it('removes the ideographic comma if the browser inserts it after beforeinput was prevented', async () => {
+    slashCommands = [{ name: 'help', description: 'Show help', source: 'api' }]
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireBeforeInput(textarea, '、')
+    fireEvent.change(textarea, { target: { value: '/、', selectionStart: 2, selectionEnd: 2 } })
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('/')
+      expect(screen.getByRole('button', { name: 'help' })).toBeInTheDocument()
+    })
+  })
+
+  it('replaces ideographic comma submitted through change with slash and opens commands', async () => {
+    slashCommands = [{ name: 'help', description: 'Show help', source: 'api' }]
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '、', selectionStart: 1, selectionEnd: 1 } })
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('/')
+      expect(screen.getByRole('button', { name: 'help' })).toBeInTheDocument()
+    })
+  })
+
+  it('uses Tab to toggle agents inside the composer when configured', () => {
+    keybindingMap = { sendMessage: 'Enter', toggleAgent: 'Tab' }
+    const onAgentChange = vi.fn()
+
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        agents={[
+          { name: 'build', mode: 'primary' },
+          { name: 'plan', mode: 'primary' },
+        ] as never}
+        selectedAgent="build"
+        onAgentChange={onAgentChange}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab' })
+
+    expect(onAgentChange).toHaveBeenCalledWith('plan')
+  })
+
+  it('uses Ctrl+T to toggle variants inside the composer when configured', () => {
+    keybindingMap = { sendMessage: 'Enter', toggleVariant: 'Ctrl+T' }
+    const onVariantChange = vi.fn()
+
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        variants={['low', 'medium']}
+        selectedVariant={undefined}
+        onVariantChange={onVariantChange}
+      />,
+    )
+
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 't', ctrlKey: true })
+
+    expect(onVariantChange).toHaveBeenCalledWith('low')
+  })
+
+  it('does not replace ideographic comma when the setting is disabled', () => {
+    themeStore.setIdeographicCommaSlashCommand(false)
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '、', selectionStart: 1 } })
+
+    expect(textarea.value).toBe('、')
+  })
+
+  it('does not replace ideographic comma when the input is not empty', () => {
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '先', selectionStart: 1 } })
+    fireBeforeInput(textarea, '、')
+    fireEvent.change(textarea, { target: { value: '先、', selectionStart: 2 } })
+
+    expect(textarea.value).toBe('先、')
   })
 
   it('keeps the draft when sending fails', async () => {
@@ -216,6 +343,26 @@ describe('InputBox slash command selection', () => {
 
     await act(async () => {
       resolveCommand?.(true)
+    })
+  })
+
+  it('selects slash commands with Enter even while an IME composition guard is active', async () => {
+    slashCommands = [{ name: 'review', description: 'Run review', source: 'api' }]
+
+    render(<InputBox paneId="pane-test" onSend={vi.fn()} onCommand={vi.fn()} />)
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '/', selectionStart: 1 } })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'review' })).toBeInTheDocument()
+    })
+
+    fireEvent.compositionStart(textarea)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(textarea.value).toBe('/review ')
     })
   })
 

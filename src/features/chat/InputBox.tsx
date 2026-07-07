@@ -240,7 +240,10 @@ function InputBoxComponent({
       },
     [fileCapabilitiesProp, supportsImages],
   )
-  const { externalFileDropMode } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
+  const { externalFileDropMode, ideographicCommaSlashCommand } = useSyncExternalStore(
+    themeStore.subscribe,
+    themeStore.getSnapshot,
+  )
 
   // 是否有任何文件附件能力
   const supportsAnyFile = fileCaps.image || fileCaps.pdf || fileCaps.audio || fileCaps.video
@@ -284,6 +287,8 @@ function InputBoxComponent({
   const footerRef = useRef<HTMLDivElement>(null)
   const isComposingRef = useRef(false)
   const compositionEndTimerRef = useRef<number | null>(null)
+  const ideographicCommaSlashPendingRef = useRef(false)
+  const ideographicCommaSlashTimerRef = useRef<number | null>(null)
   const [composerMaxHeight, setComposerMaxHeight] = useState(280)
   const [inputContainerMaxHeight, setInputContainerMaxHeight] = useState(240)
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(180)
@@ -358,6 +363,9 @@ function InputBoxComponent({
     () => () => {
       if (compositionEndTimerRef.current !== null) {
         clearTimeout(compositionEndTimerRef.current)
+      }
+      if (ideographicCommaSlashTimerRef.current !== null) {
+        clearTimeout(ideographicCommaSlashTimerRef.current)
       }
     },
     [],
@@ -586,12 +594,55 @@ function InputBoxComponent({
     [text, mentionStartIndex, mentionQuery],
   )
 
+  const openSlashCommandAtStart = useCallback(() => {
+    ideographicCommaSlashPendingRef.current = true
+    if (ideographicCommaSlashTimerRef.current !== null) {
+      clearTimeout(ideographicCommaSlashTimerRef.current)
+    }
+    ideographicCommaSlashTimerRef.current = window.setTimeout(() => {
+      ideographicCommaSlashPendingRef.current = false
+      ideographicCommaSlashTimerRef.current = null
+    }, 0)
+
+    setText('/')
+    handleHistoryChange('/')
+    setMentionOpen(false)
+    setSlashQuery('')
+    setSlashStartIndex(0)
+    setSlashOpen(true)
+
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return
+      textareaRef.current.setSelectionRange(1, 1)
+      textareaRef.current.focus()
+    })
+  }, [handleHistoryChange])
+
+  const handleComposerToggleAgent = useCallback(() => {
+    if (!onAgentChange) return false
+
+    const primaryAgents = agents.filter(agent => agent.mode !== 'subagent' && !agent.hidden)
+    if (primaryAgents.length <= 1) return false
+
+    const currentIndex = primaryAgents.findIndex(agent => agent.name === selectedAgent)
+    const nextIndex = (currentIndex + 1) % primaryAgents.length
+    onAgentChange(primaryAgents[nextIndex].name)
+    return true
+  }, [agents, onAgentChange, selectedAgent])
+
+  const handleComposerToggleVariant = useCallback(() => {
+    if (!onVariantChange || variants.length === 0) return false
+
+    const currentPosition = selectedVariant ? variants.indexOf(selectedVariant) + 1 : 0
+    const nextPosition = (currentPosition + 1) % (variants.length + 1)
+    onVariantChange(nextPosition === 0 ? undefined : variants[nextPosition - 1])
+    return true
+  }, [onVariantChange, selectedVariant, variants])
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const nativeEvent = e.nativeEvent
       const isImeComposing = isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229
-
-      if (isImeComposing && (e.key === 'Enter' || e.key === 'Tab')) return
 
       // Slash Command 菜单打开时，拦截导航键
       if (slashOpen && slashMenuRef.current) {
@@ -613,8 +664,10 @@ function InputBoxComponent({
             e.preventDefault()
             setSlashOpen(false)
             return
-        }
+          }
       }
+
+      if (isImeComposing && (e.key === 'Enter' || e.key === 'Tab')) return
 
       // Mention 菜单打开时，拦截导航键
       if (mentionOpen && mentionMenuRef.current) {
@@ -666,6 +719,18 @@ function InputBoxComponent({
         }
       }
 
+      const toggleAgentKey = keybindingStore.getKey('toggleAgent')
+      if (toggleAgentKey && matchesKeybinding(nativeEvent, toggleAgentKey) && handleComposerToggleAgent()) {
+        e.preventDefault()
+        return
+      }
+
+      const toggleVariantKey = keybindingStore.getKey('toggleVariant')
+      if (toggleVariantKey && matchesKeybinding(nativeEvent, toggleVariantKey) && handleComposerToggleVariant()) {
+        e.preventDefault()
+        return
+      }
+
       // Tab 键：mention 菜单关闭时，不做任何事（阻止跳到工具栏）
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -693,12 +758,47 @@ function InputBoxComponent({
         handleSend()
       }
     },
-    [mentionOpen, slashOpen, mentionQuery, updateMentionQuery, handleSend, text, attachments, handleHistoryKeyDown],
+    [
+      mentionOpen,
+      slashOpen,
+      mentionQuery,
+      updateMentionQuery,
+      handleComposerToggleAgent,
+      handleComposerToggleVariant,
+      handleSend,
+      text,
+      attachments,
+      handleHistoryKeyDown,
+    ],
   )
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const newText = e.target.value
+
+      if (
+        ideographicCommaSlashCommand &&
+        text.length === 0 &&
+        attachments.length === 0 &&
+        newText === '、' &&
+        e.target.selectionStart === 1 &&
+        e.target.selectionEnd === 1
+      ) {
+        openSlashCommandAtStart()
+        return
+      }
+
+      if (
+        ideographicCommaSlashCommand &&
+        ideographicCommaSlashPendingRef.current &&
+        text === '/' &&
+        attachments.length === 0 &&
+        newText === '/、'
+      ) {
+        openSlashCommandAtStart()
+        return
+      }
+
       setText(newText)
 
       // 用户修改了内容，检查是否应退出历史模式
@@ -740,8 +840,29 @@ function InputBoxComponent({
         }
       }
     },
-    [handleHistoryChange],
+    [attachments.length, handleHistoryChange, ideographicCommaSlashCommand, openSlashCommandAtStart, text],
   )
+
+  const handleBeforeInput = useCallback(
+    (event: InputEvent) => {
+      if (!ideographicCommaSlashCommand) return
+      if (isComposingRef.current || event.isComposing) return
+      if (event.inputType !== 'insertText' || event.data !== '、') return
+      if (text.length > 0 || attachments.length > 0) return
+      if (textareaRef.current && (textareaRef.current.selectionStart !== 0 || textareaRef.current.selectionEnd !== 0)) return
+
+      event.preventDefault()
+      openSlashCommandAtStart()
+    },
+    [attachments.length, ideographicCommaSlashCommand, openSlashCommandAtStart, text.length],
+  )
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.addEventListener('beforeinput', handleBeforeInput)
+    return () => textarea.removeEventListener('beforeinput', handleBeforeInput)
+  }, [handleBeforeInput])
 
   const handleCompositionStart = useCallback(() => {
     if (compositionEndTimerRef.current !== null) {

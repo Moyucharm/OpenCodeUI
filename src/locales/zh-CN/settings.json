@@ -92,6 +92,8 @@
     "collapseLongMessagesDesc": "自动折叠较长的用户消息",
     "renderUserMarkdown": "用户消息 Markdown 渲染",
     "renderUserMarkdownDesc": "开启后，用户发送的消息会按 Markdown 渲染；关闭时保持纯文本显示",
+    "ideographicCommaSlashCommand": "中文顿号唤起 / 指令",
+    "ideographicCommaSlashCommandDesc": "输入框为空时输入“、”会直接替换为“/”，方便中文输入法快速打开指令菜单",
     "outlineCurrentHighlight": "高亮当前对话位置",
     "outlineCurrentHighlightDesc": "在右侧历史导航条中标出当前视口所属的用户提示词",
     "descriptiveToolSteps": "描述型步骤",
@@ -392,6 +394,8 @@
     "alreadyInUse": "已被占用",
     "resetToDefault": "恢复默认",
     "clickToRebind": "点击快捷键进行重新绑定。Enter 确认，Esc 取消。",
+    "useTuiDefaults": "使用 TUI 默认按键",
+    "useTuiDefaultsDesc": "只应用到未自定义的快捷键；Tab 切换 Agent，Ctrl+T 切换思考力度。浏览器可能保留部分快捷键。",
     "categories": {
       "general": "通用",
       "session": "会话",

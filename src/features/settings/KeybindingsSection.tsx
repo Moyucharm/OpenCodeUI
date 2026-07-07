@@ -27,6 +27,7 @@ const ACTION_TRANSLATION_KEYS: Record<KeybindingAction, { label: string; descrip
   'terminal.paste': { label: 'terminalPaste', description: 'terminalPasteDesc' },
   selectModel: { label: 'selectModel', description: 'selectModelDesc' },
   toggleAgent: { label: 'toggleAgent', description: 'toggleAgentDesc' },
+  toggleVariant: { label: 'toggleVariant', description: 'toggleVariantDesc' },
   sendMessage: { label: 'sendMessage', description: 'sendMessageDesc' },
   cancelMessage: { label: 'cancelMessage', description: 'cancelMessageDesc' },
   copyLastResponse: { label: 'copyLastResponse', description: 'copyLastResponseDesc' },
@@ -227,7 +228,7 @@ const CATEGORY_LABELS: Record<KeybindingConfig['category'], string> = {
 
 export function KeybindingsSection() {
   const { t } = useTranslation(['settings', 'common', 'commands'])
-  const { keybindings, setKeybinding, resetKeybinding, resetAll, isKeyUsed } = useKeybindingStore()
+  const { keybindings, setKeybinding, resetKeybinding, resetAll, isKeyUsed, preset, setPreset } = useKeybindingStore()
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -262,6 +263,7 @@ export function KeybindingsSection() {
   )
 
   const hasModifications = localizedKeybindings.some(kb => kb.currentKey !== kb.defaultKey)
+  const tuiPresetEnabled = preset === 'tui'
 
   // 自动聚焦搜索
   useEffect(() => {
@@ -281,6 +283,33 @@ export function KeybindingsSection() {
             {t('keybindings.resetAll')}
           </button>
         )}
+      </div>
+
+      <div
+        className="mb-3 flex items-center justify-between gap-4 rounded-lg border border-border-200/50 bg-bg-050/60 px-3 py-2.5 cursor-pointer"
+        onClick={() => setPreset(tuiPresetEnabled ? 'web' : 'tui')}
+      >
+        <div className="min-w-0">
+          <div className="text-[length:var(--fs-md)] font-medium text-text-100">{t('keybindings.useTuiDefaults')}</div>
+          <div className="mt-0.5 text-[length:var(--fs-xs)] text-text-400 leading-relaxed">
+            {t('keybindings.useTuiDefaultsDesc')}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={tuiPresetEnabled}
+          onClick={e => {
+            e.stopPropagation()
+            setPreset(tuiPresetEnabled ? 'web' : 'tui')
+          }}
+          className={`relative h-5 w-9 rounded-full transition-colors ${tuiPresetEnabled ? 'bg-accent-main-100' : 'bg-bg-300 ring-1 ring-border-200'}`}
+        >
+          <span
+            className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform"
+            style={{ transform: tuiPresetEnabled ? 'translateX(16px)' : 'translateX(0)' }}
+          />
+        </button>
       </div>
 
       {/* Search */}

@@ -33,6 +33,8 @@
   "selectModelDesc": "打开模型选择器",
   "toggleAgent": "切换 Agent",
   "toggleAgentDesc": "切换 Agent 模式",
+  "toggleVariant": "切换思考力度",
+  "toggleVariantDesc": "循环切换模型思考力度或变体",
   "sendMessage": "发送消息",
   "sendMessageDesc": "发送当前消息",
   "copyLastResponse": "复制最后回复",
