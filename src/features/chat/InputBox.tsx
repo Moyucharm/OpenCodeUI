@@ -182,6 +182,7 @@ export interface InputBoxProps {
   isAtBottom?: boolean
   showScrollToBottom?: boolean
   onScrollToBottom?: () => void
+  avoidStatusBanner?: boolean
   // Collapsed dialog capsules
   collapsedPermission?: CollapsedDialogInfo
   collapsedQuestion?: CollapsedDialogInfo
@@ -225,6 +226,7 @@ function InputBoxComponent({
   isAtBottom = true,
   showScrollToBottom = false,
   onScrollToBottom,
+  avoidStatusBanner = false,
   collapsedPermission,
   collapsedQuestion,
 }: InputBoxProps) {
@@ -1427,7 +1429,7 @@ function InputBoxComponent({
             className={
               isCollapsed
                 ? 'flex justify-center pb-2'
-                : 'absolute bottom-full left-0 right-0 flex justify-center pb-2 pointer-events-none'
+                : `absolute ${avoidStatusBanner ? 'bottom-[calc(100%+44px)]' : 'bottom-full'} left-0 right-0 flex justify-center pb-2 pointer-events-none`
             }
           >
             <div className={isCollapsed ? undefined : 'pointer-events-auto'}>

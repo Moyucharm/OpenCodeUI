@@ -791,6 +791,7 @@ export const ChatPane = memo(function ChatPane({
       }),
     [isStreaming, messages, pendingPermissionRequests, pendingQuestionRequests, routeStatus],
   )
+  const hasInputStatusBanner = showCancelHint || (fullAutoHint && !showCancelHint) || !!workingStatus
 
   // ============================================
   // Render
@@ -854,10 +855,12 @@ export const ChatPane = memo(function ChatPane({
         visibleMessageIds={visibleMessageIds}
         currentHighlightEnabled={outlineCurrentHighlight}
         onScrollToMessageId={handleOutlineScrollToMessage}
+        showScrollToBottom={!isAtBottom}
+        onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
       />
 
       <div ref={inputBoxWrapperRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-        {(showCancelHint || (fullAutoHint && !showCancelHint) || workingStatus) && (
+        {hasInputStatusBanner && (
           <div className="absolute bottom-full inset-x-0 flex justify-center pb-2 pointer-events-none z-20">
             {showCancelHint || (fullAutoHint && !showCancelHint) ? (
               <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -923,6 +926,7 @@ export const ChatPane = memo(function ChatPane({
           isAtBottom={isAtBottom}
           showScrollToBottom={!isAtBottom}
           onScrollToBottom={() => chatAreaRef.current?.scrollToBottom()}
+          avoidStatusBanner={hasInputStatusBanner}
           collapsedPermission={
             !inlineToolRequests && pendingPermissionRequests.length > 0 && permissionCollapsed
               ? {

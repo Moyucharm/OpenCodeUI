@@ -80,4 +80,92 @@ describe('useSessionManager', () => {
       expect.objectContaining({ name: 'APIError' }),
     )
   })
+
+  it('loads persisted messages without inferring a live streaming state', async () => {
+    const messages = [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          parentID: 'user-1',
+          modelID: 'model-1',
+          providerID: 'provider-1',
+          mode: 'chat',
+          agent: 'build',
+          path: { cwd: '/workspace/demo', root: '/workspace/demo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1 },
+        },
+        parts: [],
+      },
+    ]
+    getSessionMessagesMock.mockResolvedValue(messages)
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+        'session-1',
+        messages,
+        expect.objectContaining({ inferStreaming: false }),
+      )
+    })
+  })
+
+  it('preserves an existing live streaming state during baseline load', async () => {
+    const messages = [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          parentID: 'user-1',
+          modelID: 'model-1',
+          providerID: 'provider-1',
+          mode: 'chat',
+          agent: 'build',
+          path: { cwd: '/workspace/demo', root: '/workspace/demo' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1 },
+        },
+        parts: [],
+      },
+    ]
+    messageStoreMock.getSessionState.mockReturnValue({
+      isStreaming: true,
+      isStale: false,
+      loadState: 'loading',
+      messages: [
+        {
+          info: messages[0].info,
+          parts: [],
+          isStreaming: true,
+        },
+      ],
+    })
+    getSessionMessagesMock.mockResolvedValue(messages)
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+        'session-1',
+        messages,
+        expect.objectContaining({ inferStreaming: true }),
+      )
+    })
+  })
 })

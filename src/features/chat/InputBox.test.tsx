@@ -456,6 +456,22 @@ describe('InputBox slash command selection', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
+  it('moves floating actions above the working status banner when requested', () => {
+    render(
+      <InputBox
+        paneId="pane-test"
+        onSend={vi.fn()}
+        showScrollToBottom
+        onScrollToBottom={vi.fn()}
+        avoidStatusBanner
+      />,
+    )
+
+    const floatingActions = document.querySelector('[data-floating-actions]')
+
+    expect(floatingActions).toHaveClass('bottom-[calc(100%+44px)]')
+  })
+
   it('keeps navigating multiline history entries with ArrowUp', async () => {
     messagesMock = [createHistoryMessage('first line\nsecond line'), createHistoryMessage('third line\nfourth line')]
 

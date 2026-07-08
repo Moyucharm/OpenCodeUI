@@ -18,6 +18,7 @@
 
 import { memo, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import type { CSSProperties } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Message } from '../types/message'
 import { useChatViewport } from '../features/chat/chatViewport'
 import { buildOutlineSourceEntries, truncateOutlineLabel, type OutlineSourceEntry } from './outlineIndexModel'
@@ -40,6 +41,8 @@ interface OutlineIndexProps {
   visibleMessageIds?: string[]
   currentHighlightEnabled?: boolean
   onScrollToMessageId: (messageId: string) => void
+  showScrollToBottom?: boolean
+  onScrollToBottom?: () => void
 }
 
 interface FisheyeConfig {
@@ -75,6 +78,8 @@ interface VisualConfig {
 interface FisheyeProps {
   entries: OutlineEntry[]
   onSelect: (messageId: string) => void
+  showScrollToBottom?: boolean
+  onScrollToBottom?: () => void
   visual: VisualConfig
   /** 当前可见区域所属 user prompt 在 entries 中的位置。 */
   ownerVisibleIndex: number
@@ -347,6 +352,43 @@ function TickRail({ entries, visual }: TickRailProps) {
   )
 }
 
+function ScrollToBottomTick({ onClick, visual, index }: { onClick?: () => void; visual: VisualConfig; index: number }) {
+  const { t } = useTranslation(['chat', 'common'])
+
+  if (!onClick) return null
+
+  const label = t('inputActions.scrollToBottom')
+  const itemStyle = buildItemStyle(visual.fisheye.css, visual.fisheye.margin.min)
+  const tickStyle = buildTickStyle(visual.fisheye)
+  const labelStyle = buildLabelStyle(visual.fisheye)
+
+  return (
+    <button
+      type="button"
+      data-oi-item
+      data-oi-scroll-bottom="true"
+      onClick={event => {
+        event.stopPropagation()
+        onClick()
+      }}
+      onTouchStart={event => event.stopPropagation()}
+      className="relative flex items-center justify-end cursor-pointer border-0 bg-transparent p-0 text-left"
+      style={{ ...itemStyle, '--oi-index': String(index) } as CSSProperties}
+      aria-label={label}
+      title={label}
+    >
+      <span
+        data-oi-label
+        className={`absolute right-full mr-2.5 whitespace-nowrap pointer-events-none ${visual.labelClassName}`}
+        style={labelStyle}
+      >
+        {label}
+      </span>
+      <span data-oi-tick className="rounded-full shrink-0" style={{ ...tickStyle, backgroundColor: TICK_COLORS.focused.bg, boxShadow: TICK_COLORS.focused.shadow }} />
+    </button>
+  )
+}
+
 // ─── Entry Point ────────────────────────────
 
 export const OutlineIndex = memo(function OutlineIndex({
@@ -356,6 +398,8 @@ export const OutlineIndex = memo(function OutlineIndex({
   visibleMessageIds,
   currentHighlightEnabled = true,
   onScrollToMessageId,
+  showScrollToBottom = false,
+  onScrollToBottom,
 }: OutlineIndexProps) {
   const { interaction, presentation } = useChatViewport()
   const visual = presentation.isCompact ? COMPACT_VISUAL : DESKTOP_VISUAL
@@ -393,15 +437,30 @@ export const OutlineIndex = memo(function OutlineIndex({
   if (entries.length < 2) return null
 
   return interaction.outlineInteraction === 'touch' ? (
-    <TouchFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <TouchFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      showScrollToBottom={showScrollToBottom}
+      onScrollToBottom={onScrollToBottom}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   ) : (
-    <PointerFisheye entries={entries} onSelect={onScrollToMessageId} visual={visual} ownerVisibleIndex={ownerVisibleIndex} />
+    <PointerFisheye
+      entries={entries}
+      onSelect={onScrollToMessageId}
+      showScrollToBottom={showScrollToBottom}
+      onScrollToBottom={onScrollToBottom}
+      visual={visual}
+      ownerVisibleIndex={ownerVisibleIndex}
+    />
   )
 })
 
 // ─── PointerFisheye ─────────────────────────
 
-const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual, ownerVisibleIndex }: FisheyeProps) {
+const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, showScrollToBottom, onScrollToBottom, visual, ownerVisibleIndex }: FisheyeProps) {
+  const itemCount = entries.length + (showScrollToBottom ? 1 : 0)
   const zoneRef = useRef<HTMLDivElement>(null)
   const railRef = useRef<HTMLDivElement>(null)
   const hoveringRef = useRef(false)
@@ -411,11 +470,13 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
   const railCenterRef = useRef(0)
   const entriesRef = useRef(entries)
   const onSelectRef = useRef(onSelect)
+  const onScrollToBottomRef = useRef(onScrollToBottom)
   const ownerVisibleIndexRef = useRef(ownerVisibleIndex)
   const fisheyeRef = useRef(visual.fisheye)
   useEffect(() => {
     entriesRef.current = entries
     onSelectRef.current = onSelect
+    onScrollToBottomRef.current = onScrollToBottom
     ownerVisibleIndexRef.current = ownerVisibleIndex
     fisheyeRef.current = visual.fisheye
   })
@@ -427,7 +488,7 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
 
   useLayoutEffect(() => {
     railCenterRef.current = syncRailCenter(railRef.current)
-  }, [entries, visual])
+  }, [entries, itemCount, visual])
 
   useEffect(() => {
     const onResize = () => {
@@ -473,10 +534,10 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     if (!rail) return
     ticksRef.current = getTicks()
     activateRail(rail, e.clientY)
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+    const next = nearestIndexFromY(itemCount, e.clientY, railCenterRef.current, fisheyeRef.current)
     focusIdxRef.current = next
     repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
-  }, [setZoneActive, getTicks])
+  }, [itemCount, setZoneActive, getTicks])
 
   const onZoneMove = useCallback((e: React.MouseEvent) => {
     const rail = railRef.current
@@ -484,13 +545,13 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     // 主线程每帧唯一的工作：写一个变量。其余 transform 交给合成线程。
     rail.style.setProperty('--oi-cursor-y', String(e.clientY))
     // 算最近焦点（纯数值），仅在变化时重新着色（paint-only，非每帧）
-    const next = nearestIndexFromY(entriesRef.current.length, e.clientY, railCenterRef.current, fisheyeRef.current)
+    const next = nearestIndexFromY(itemCount, e.clientY, railCenterRef.current, fisheyeRef.current)
     if (next !== focusIdxRef.current) {
       if (ticksRef.current.length === 0) ticksRef.current = getTicks()
       focusIdxRef.current = next
       repaintTicks(ticksRef.current, next, ownerVisibleIndexRef.current)
     }
-  }, [getTicks])
+  }, [itemCount, getTicks])
   const onZoneLeave = useCallback(() => deactivate(), [deactivate])
 
   const onZoneClick = useCallback(() => {
@@ -499,6 +560,9 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
     if (idx >= 0 && idx < cur.length) {
       deactivate()
       onSelectRef.current(cur[idx].messageId)
+    } else if (idx === cur.length) {
+      deactivate()
+      onScrollToBottomRef.current?.()
     }
   }, [deactivate])
 
@@ -512,17 +576,23 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
       onClick={onZoneClick}
     >
       <div
-        className="flex justify-end py-1"
+        className="flex flex-col items-end justify-center py-1"
         style={{
           pointerEvents: 'auto',
           paddingRight: `${visual.rightOffset}px`,
           paddingLeft: `${visual.hitPadLeft}px`,
           width: `${visual.pointerHitWidth + visual.hitPadLeft + visual.rightOffset}px`,
         }}
-        onMouseEnter={onTickEnter}
       >
-        <div ref={railRef} className="pointer-events-none flex flex-col items-end" style={buildRailVars(entries.length, visual.fisheye)}>
+        <div
+          ref={railRef}
+          data-oi-rail="true"
+          className="flex flex-col items-end"
+          style={buildRailVars(itemCount, visual.fisheye)}
+          onMouseEnter={onTickEnter}
+        >
           <TickRail entries={entries} visual={visual} />
+          {showScrollToBottom && <ScrollToBottomTick onClick={onScrollToBottom} visual={visual} index={entries.length} />}
         </div>
       </div>
     </div>
@@ -531,7 +601,9 @@ const PointerFisheye = memo(function PointerFisheye({ entries, onSelect, visual,
 
 // ─── TouchFisheye ───────────────────────────
 
-const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, ownerVisibleIndex }: FisheyeProps) {
+const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, showScrollToBottom, onScrollToBottom, visual, ownerVisibleIndex }: FisheyeProps) {
+  const { t } = useTranslation(['chat', 'common'])
+  const itemCount = entries.length + (showScrollToBottom ? 1 : 0)
   const railRef = useRef<HTMLDivElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
@@ -543,14 +615,18 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
 
   const entriesRef = useRef(entries)
   const onSelectRef = useRef(onSelect)
+  const onScrollToBottomRef = useRef(onScrollToBottom)
+  const scrollToBottomLabelRef = useRef(t('inputActions.scrollToBottom'))
   const ownerVisibleIndexRef = useRef(ownerVisibleIndex)
   const fisheyeRef = useRef(visual.fisheye)
   useEffect(() => {
     entriesRef.current = entries
     onSelectRef.current = onSelect
+    onScrollToBottomRef.current = onScrollToBottom
+    scrollToBottomLabelRef.current = t('inputActions.scrollToBottom')
     ownerVisibleIndexRef.current = ownerVisibleIndex
     fisheyeRef.current = visual.fisheye
-  })
+  }, [entries, onScrollToBottom, onSelect, ownerVisibleIndex, t, visual.fisheye])
 
   useEffect(() => {
     ticksRef.current = []
@@ -559,7 +635,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
 
   useLayoutEffect(() => {
     railCenterRef.current = syncRailCenter(railRef.current)
-  }, [entries, visual])
+  }, [entries, itemCount, visual])
 
   useEffect(() => {
     const onResize = () => {
@@ -601,6 +677,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
     if (!el) return
 
     const onStart = (e: TouchEvent) => {
+      if (e.target instanceof Element && e.target.closest('[data-oi-scroll-bottom="true"]')) return
       const touch = e.touches[0]
       if (!touch) return
       e.preventDefault()
@@ -625,7 +702,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
     }
     // 算焦点 + 触觉 + overlay 标题（仅在焦点变化时，paint-only）
     const updateFocus = (y: number) => {
-      const next = nearestIndexFromY(entriesRef.current.length, y, railCenterRef.current, fisheyeRef.current)
+      const next = nearestIndexFromY(itemCount, y, railCenterRef.current, fisheyeRef.current)
       if (next === prevFocusRef.current) return
       prevFocusRef.current = next
       if (ticksRef.current.length === 0) ticksRef.current = getTicks()
@@ -634,7 +711,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       if (next >= 0) {
         vibrate()
         if (ov) {
-          ov.textContent = entriesRef.current[next]?.overlayLabel ?? ''
+          ov.textContent = next === entriesRef.current.length ? scrollToBottomLabelRef.current : (entriesRef.current[next]?.overlayLabel ?? '')
           ov.style.opacity = '1'
           ov.style.transform = 'translateY(0px)'
         }
@@ -648,6 +725,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       const idx = prevFocusRef.current
       const cur = entriesRef.current
       if (idx >= 0 && idx < cur.length) onSelectRef.current(cur[idx].messageId)
+      else if (idx === cur.length) onScrollToBottomRef.current?.()
 
       touchingRef.current = false
       prevFocusRef.current = -1
@@ -671,7 +749,7 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
       document.removeEventListener('touchend', onEnd)
       document.removeEventListener('touchcancel', onEnd)
     }
-  }, [getTicks, vibrate])
+  }, [itemCount, getTicks, vibrate])
 
   return (
     <div>
@@ -691,12 +769,11 @@ const TouchFisheye = memo(function TouchFisheye({ entries, onSelect, visual, own
         />
       </div>
 
-      <div
-        ref={railRef}
-        className="absolute top-1/2 -translate-y-1/2 z-[15] flex flex-col items-end select-none"
-        style={{ right: `${visual.rightOffset}px`, ...buildRailVars(entries.length, visual.fisheye) }}
-      >
-        <TickRail entries={entries} visual={visual} />
+      <div className="absolute top-1/2 -translate-y-1/2 z-[15] flex flex-col items-end select-none" style={{ right: `${visual.rightOffset}px` }}>
+        <div ref={railRef} data-oi-rail="true" className="flex flex-col items-end" style={buildRailVars(itemCount, visual.fisheye)}>
+          <TickRail entries={entries} visual={visual} />
+          {showScrollToBottom && <ScrollToBottomTick onClick={onScrollToBottom} visual={visual} index={entries.length} />}
+        </div>
       </div>
     </div>
   )

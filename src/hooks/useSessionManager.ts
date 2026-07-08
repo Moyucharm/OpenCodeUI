@@ -175,6 +175,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           hasMoreHistory: apiMessages.length >= INITIAL_MESSAGE_LIMIT,
           revertState: sessionInfo?.revert ?? null,
           shareUrl: sessionInfo?.share?.url,
+          inferStreaming: !!currentState?.isStreaming,
         })
 
         cursorRef.current.set(sid, Math.max(INITIAL_MESSAGE_LIMIT, apiMessages.length))
