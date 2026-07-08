@@ -74,10 +74,11 @@ export function getWorkingStatus({
     return { title: 'Retrying', detail: getRetryDetail(routeStatus), tone: 'retry' }
   }
 
-  const activeTool = getActiveTool(messages)
+  const isWorking = isStreaming || routeStatus?.type === 'busy'
+  const activeTool = isWorking ? getActiveTool(messages) : null
   if (activeTool) return { title: 'Working', detail: getToolDetail(activeTool), tone: 'working' }
 
-  if (isStreaming || routeStatus?.type === 'busy') return { title: 'Working', tone: 'working' }
+  if (isWorking) return { title: 'Working', tone: 'working' }
 
   return null
 }

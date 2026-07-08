@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../../components/ui/Button'
-import { TrashIcon, WifiIcon, WifiOffIcon, SpinnerIcon, StopIcon } from '../../../components/Icons'
+import { TrashIcon, WifiIcon, WifiOffIcon, SpinnerIcon, StopIcon, RetryIcon } from '../../../components/Icons'
 import { useServerStore, useIsMobile } from '../../../hooks'
 import { API_BASE_URL } from '../../../constants'
 import { LOCAL_SERVER_ID } from '../../../store/serverStore'
@@ -15,6 +15,33 @@ interface StartOpencodeServiceResult {
   started: boolean
   startedByUs: boolean
   url?: string | null
+}
+
+const RESTART_STOP_TIMEOUT_MS = 5000
+const RESTART_STOP_POLL_INTERVAL_MS = 250
+
+type TauriCoreModule = typeof import('@tauri-apps/api/core') & {
+  default?: typeof import('@tauri-apps/api/core')
+}
+
+async function loadTauriInvoke() {
+  const module = (await import('@tauri-apps/api/core')) as TauriCoreModule | undefined
+  const invoke = module?.invoke ?? module?.default?.invoke
+  if (!invoke) throw new Error('Tauri invoke API unavailable')
+  return invoke
+}
+
+function delay(ms: number) {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+async function waitForServiceStopped(invoke: Awaited<ReturnType<typeof loadTauriInvoke>>, url: string) {
+  const deadline = Date.now() + RESTART_STOP_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const running = await invoke<boolean>('check_opencode_service', { url }).catch(() => false)
+    if (!running) return
+    await delay(RESTART_STOP_POLL_INTERVAL_MS)
+  }
 }
 
 export function ServiceSettings() {
@@ -37,6 +64,7 @@ export function ServiceSettings() {
   const [localBinaryPath, setLocalBinaryPath] = useState(binaryPath)
   const pathDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [detectingBinary, setDetectingBinary] = useState(false)
+  const [serviceRestarting, setServiceRestarting] = useState(false)
   // 启动失败的错误信息
   const [serviceError, setServiceError] = useState('')
 
@@ -69,7 +97,7 @@ export function ServiceSettings() {
     if (!isTauriDesktop) return
     setDetectingBinary(true)
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
+      const invoke = await loadTauriInvoke()
       const detected = await invoke<string | null>('detect_opencode_binary', { envVars: serviceStore.envVarsRecord })
       serviceStore.setDetectedBinaryPath(detected)
     } catch (e) {
@@ -80,23 +108,27 @@ export function ServiceSettings() {
     }
   }
 
+  const startService = async () => {
+    const invoke = await loadTauriInvoke()
+    const detected = await invoke<string | null>('detect_opencode_binary', { envVars: serviceStore.envVarsRecord }).catch(
+      () => null,
+    )
+    serviceStore.setDetectedBinaryPath(detected)
+    const result = await invoke<StartOpencodeServiceResult>('start_opencode_service', {
+      url: getServerUrl(),
+      binaryPath: serviceStore.effectiveBinaryPath,
+      envVars: serviceStore.envVarsRecord,
+    })
+    applyLocalServiceUrl(result.url)
+    serviceStore.setStartedByUs(result.startedByUs)
+    serviceStore.setRunning(true)
+  }
+
   const handleStartService = async () => {
     setServiceError('')
+    serviceStore.setStarting(true)
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      serviceStore.setStarting(true)
-      const detected = await invoke<string | null>('detect_opencode_binary', { envVars: serviceStore.envVarsRecord }).catch(
-        () => null,
-      )
-      serviceStore.setDetectedBinaryPath(detected)
-      const result = await invoke<StartOpencodeServiceResult>('start_opencode_service', {
-        url: getServerUrl(),
-        binaryPath: serviceStore.effectiveBinaryPath,
-        envVars: serviceStore.envVarsRecord,
-      })
-      applyLocalServiceUrl(result.url)
-      serviceStore.setStartedByUs(result.startedByUs)
-      serviceStore.setRunning(true)
+      await startService()
     } catch (e) {
       const msg = String(e)
       apiErrorHandler('start service', msg)
@@ -109,7 +141,7 @@ export function ServiceSettings() {
   const handleStopService = async () => {
     setServiceError('')
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
+      const invoke = await loadTauriInvoke()
       await invoke('stop_opencode_service')
       serviceStore.setStartedByUs(false)
       serviceStore.setRunning(false)
@@ -118,9 +150,31 @@ export function ServiceSettings() {
     }
   }
 
+  const handleRestartService = async () => {
+    if (!serviceRunning || !startedByUs) return
+    setServiceError('')
+    setServiceRestarting(true)
+    serviceStore.setStarting(true)
+    try {
+      const invoke = await loadTauriInvoke()
+      await invoke('stop_opencode_service')
+      serviceStore.setStartedByUs(false)
+      serviceStore.setRunning(false)
+      await waitForServiceStopped(invoke, getServerUrl())
+      await startService()
+    } catch (e) {
+      const msg = String(e)
+      apiErrorHandler('restart service', msg)
+      setServiceError(msg)
+    } finally {
+      setServiceRestarting(false)
+      serviceStore.setStarting(false)
+    }
+  }
+
   const handleCheckService = async () => {
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
+      const invoke = await loadTauriInvoke()
       const running = await invoke<boolean>('check_opencode_service', { url: getServerUrl() })
       serviceStore.setRunning(running)
       if (running) {
@@ -213,9 +267,15 @@ export function ServiceSettings() {
                 </Button>
               )}
               {!serviceStarting && serviceRunning && startedByUs && (
-                <Button size="sm" variant="ghost" onClick={handleStopService}>
+                <Button size="sm" variant="ghost" onClick={handleStopService} disabled={serviceRestarting}>
                   <StopIcon size={12} className="mr-1" />
                   {t('common:stop')}
+                </Button>
+              )}
+              {serviceRunning && startedByUs && (
+                <Button size="sm" variant="ghost" onClick={handleRestartService} isLoading={serviceRestarting} disabled={serviceStarting}>
+                  {!serviceRestarting && <RetryIcon size={12} className="mr-1" />}
+                  {t('common:restart')}
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={handleCheckService} disabled={serviceStarting}>

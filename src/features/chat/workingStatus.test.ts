@@ -56,6 +56,30 @@ describe('getWorkingStatus', () => {
     expect(status).toEqual({ title: 'Working', tone: 'working' })
   })
 
+  it('ignores stale running tool parts when the session is not active', () => {
+    const status = getWorkingStatus({
+      isStreaming: false,
+      messages: [
+        {
+          ...assistant([
+            {
+              id: 'tool-1',
+              type: 'tool',
+              sessionID: 'session-1',
+              messageID: 'assistant-1',
+              callID: 'call-1',
+              tool: 'bash',
+              state: { status: 'running', input: {}, title: 'npm run build', time: { start: 1 } },
+            },
+          ]),
+          isStreaming: false,
+        },
+      ],
+    })
+
+    expect(status).toBeNull()
+  })
+
   it('shows concrete permission text', () => {
     const status = getWorkingStatus({
       isStreaming: true,

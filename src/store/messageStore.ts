@@ -380,6 +380,7 @@ class MessageStore {
       hasMoreHistory?: boolean
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
+      inferStreaming?: boolean
     },
   ) {
     const state = this.ensureSession(sessionId)
@@ -417,9 +418,10 @@ class MessageStore {
     }
 
     // Streaming 检测
+    const inferStreaming = options?.inferStreaming ?? true
     const lastMsg = state.messages[state.messages.length - 1]
     if (lastMsg?.info.role === 'assistant') {
-      const isLastMsgStreaming = !lastMsg.info.time?.completed
+      const isLastMsgStreaming = inferStreaming && !lastMsg.info.time?.completed
       state.isStreaming = isLastMsgStreaming
       if (isLastMsgStreaming) {
         const lastIndex = state.messages.length - 1

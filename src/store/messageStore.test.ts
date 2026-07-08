@@ -52,6 +52,17 @@ function createMessageWithParts(id: string, text: string, sessionID = 'session-1
   }
 }
 
+function createIncompleteMessageWithParts(id: string, text: string, sessionID = 'session-1'): ApiMessageWithParts {
+  const info = createAssistantMessage(id, sessionID)
+  return {
+    info: {
+      ...info,
+      time: { created: info.time.created },
+    },
+    parts: [createTextPart(`part-${id}`, id, text, sessionID)],
+  }
+}
+
 describe('messageStore', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -87,6 +98,16 @@ describe('messageStore', () => {
 
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello again')])
     expect(messageStore.isSessionStale('session-1')).toBe(false)
+  })
+
+  it('can load incomplete assistant history without marking the session as streaming', () => {
+    messageStore.setMessages('session-1', [createIncompleteMessageWithParts('message-1', 'partial')], {
+      inferStreaming: false,
+    })
+
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.isStreaming).toBe(false)
+    expect(state?.messages[0].isStreaming).toBe(false)
   })
 
   it('accepts exported message envelopes that use message instead of info', () => {

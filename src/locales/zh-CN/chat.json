@@ -107,7 +107,7 @@
     "inProgress": "{{count}} 个进行中"
   },
   "inputActions": {
-    "scrollToBottom": "滚动到底部",
+    "scrollToBottom": "回到底部",
     "reply": "回复..."
   },
   "undoStatus": {

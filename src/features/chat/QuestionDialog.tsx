@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { QuestionIcon, CheckIcon, ReturnIcon, ChevronDownIcon } from '../../components/Icons'
+import { QuestionIcon, CheckIcon, ChevronDownIcon } from '../../components/Icons'
 import type { ApiQuestionRequest, ApiQuestionInfo, QuestionAnswer } from '../../api'
 import { usePresence } from '../../hooks'
 import { useChatViewport } from './chatViewport'
-import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
+import { formatKeybinding, keybindingStore, matchesKeybinding, parseKeybinding } from '../../store/keybindingStore'
 
 interface QuestionDialogProps {
   request: ApiQuestionRequest
@@ -28,6 +28,8 @@ export function QuestionDialog({
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
   const isCompact = presentation.isCompact
+  const sendKey = keybindingStore.getKey('sendMessage')
+  const sendKeyLabel = sendKey ? formatKeybinding(parseKeybinding(sendKey)) : ''
   // 每个问题选中的选项 labels
   const [answers, setAnswers] = useState<Map<number, Set<string>>>(() => {
     const map = new Map<number, Set<string>>()
@@ -159,8 +161,6 @@ export function QuestionDialog({
         onReject()
         return
       }
-      // send keybinding → 提交（仅在可提交时）
-      const sendKey = keybindingStore.getKey('sendMessage')
       if (sendKey && matchesKeybinding(e.nativeEvent, sendKey)) {
         e.preventDefault()
         if (canSubmit && !isReplying) {
@@ -168,7 +168,7 @@ export function QuestionDialog({
         }
       }
     },
-    [onReject, canSubmit, isReplying, handleSubmit],
+    [onReject, sendKey, canSubmit, isReplying, handleSubmit],
   )
 
   // 弹出/收起动画
@@ -246,7 +246,9 @@ export function QuestionDialog({
                 className="w-full flex items-center justify-between px-3.5 py-2 rounded-lg bg-text-100 text-bg-000 hover:bg-text-200 transition-colors font-medium text-[length:var(--fs-base)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>{isReplying ? t('common:sending') : t('common:submit')}</span>
-                {!isReplying && <ReturnIcon />}
+                {!isReplying && sendKeyLabel ? (
+                  <span className="text-[length:var(--fs-sm)] opacity-80">{sendKeyLabel}</span>
+                ) : null}
               </button>
 
               <button

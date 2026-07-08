@@ -11,6 +11,7 @@
   "delete": "Delete",
   "retry": "Retry",
   "refresh": "Refresh",
+  "restart": "Restart",
   "create": "Create",
   "submit": "Submit",
   "skip": "Skip",
