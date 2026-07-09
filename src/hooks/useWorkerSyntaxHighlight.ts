@@ -99,7 +99,13 @@ export function useWorkerSyntaxHighlight(
   const key = `${instanceId}:${normalizedLang}:${resolvedTheme.key}`
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) {
+      if (workerKeyRef.current) {
+        disposeShikiWorkerKey(workerKeyRef.current)
+        workerKeyRef.current = ''
+      }
+      return
+    }
 
     let cancelled = false
     const previousKey = workerKeyRef.current

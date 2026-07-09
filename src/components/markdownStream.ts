@@ -24,10 +24,6 @@ function hashString(value: string) {
   return hash.toString(36)
 }
 
-function hasReferenceDefinitions(markdown: string) {
-  return /^\[(?!\^)[^\]]+\]:\s+\S+/m.test(markdown)
-}
-
 function getTrailingOpenFenceStart(markdown: string) {
   let openFence: { start: number; char: string; size: number } | null = null
   let offset = 0
@@ -71,8 +67,14 @@ function getLanguage(value: string | undefined) {
   return value?.trim().split(/\s+/, 1)[0] || undefined
 }
 
+function appendReferenceDefinitions(src: string, referenceDefinitions: string) {
+  if (!referenceDefinitions) return src
+  return `${src.replace(/\s+$/, '')}\n\n${referenceDefinitions}`
+}
+
 function splitMarkdownBlocks(markdown: string) {
   const blocks: Array<{ start: number; raw: string; src: string; token?: Tokens.Generic }> = []
+  const referenceDefinitions: string[] = []
   let offset = 0
 
   for (const token of marked.lexer(markdown)) {
@@ -80,6 +82,10 @@ function splitMarkdownBlocks(markdown: string) {
     const start = offset
     offset += raw.length
     if (!raw) continue
+    if (token.type === 'def' && !String((token as Tokens.Def).tag ?? '').startsWith('^')) {
+      referenceDefinitions.push(raw)
+      continue
+    }
 
     if (raw.trim() === '' && blocks.length > 0) {
       blocks[blocks.length - 1].raw += raw
@@ -103,16 +109,18 @@ function splitMarkdownBlocks(markdown: string) {
     } else blocks.push({ start: offset, raw: rest, src: rest })
   }
 
-  return blocks.length > 0 ? blocks : [{ start: 0, raw: markdown, src: markdown }]
+  return {
+    blocks: blocks.length > 0 ? blocks : [{ start: 0, raw: markdown, src: markdown }],
+    referenceDefinitions: referenceDefinitions.join('\n'),
+  }
 }
 
 export function splitMarkdownStream(markdown: string, isStreaming: boolean): MarkdownStreamBlock[] {
   if (!isStreaming) {
     if (!markdown) return [{ key: 'full:empty', src: '', mode: 'full' }]
-    if (hasReferenceDefinitions(markdown)) return [{ key: `full:${hashString(markdown)}`, src: markdown, mode: 'full' }]
-    const blocks = splitMarkdownBlocks(markdown)
+    const { blocks, referenceDefinitions } = splitMarkdownBlocks(markdown)
     if (blocks.length === 1 && blocks[0]?.token?.type !== 'code' && blocks[0]?.token?.type !== 'table') {
-      return [{ key: `full:${hashString(markdown)}`, src: markdown, mode: 'full' }]
+      return [{ key: `full:${hashString(markdown)}`, src: appendReferenceDefinitions(blocks[0]?.raw ?? markdown, referenceDefinitions), mode: 'full' }]
     }
     return blocks.map(block => {
       if (block.token?.type === 'code') {
@@ -137,18 +145,19 @@ export function splitMarkdownStream(markdown: string, isStreaming: boolean): Mar
       return {
         key: `full:${block.start}:${hashString(block.raw)}`,
         raw: block.raw,
-        src: block.raw,
+        src: appendReferenceDefinitions(block.raw, referenceDefinitions),
         mode: 'full' as const,
       }
     })
   }
 
   if (!markdown) return [{ key: 'live:empty', src: '', mode: 'live' }]
-  if (hasReferenceDefinitions(markdown)) return [{ key: 'live:0:references', src: markdown, mode: 'live' }]
 
   const fenceStart = getTrailingOpenFenceStart(markdown)
-  const blocks = splitMarkdownBlocks(markdown)
-  if (blocks.length === 1 && blocks[0]?.token?.type !== 'code' && blocks[0]?.token?.type !== 'table') return [{ key: 'live:0:', src: markdown, mode: 'live' }]
+  const { blocks, referenceDefinitions } = splitMarkdownBlocks(markdown)
+  if (blocks.length === 1 && blocks[0]?.token?.type !== 'code' && blocks[0]?.token?.type !== 'table') {
+    return [{ key: 'live:0:', src: appendReferenceDefinitions(blocks[0]?.raw ?? markdown, referenceDefinitions), mode: 'live' }]
+  }
 
   return blocks.map(block => {
     const isLiveTail = block === blocks[blocks.length - 1] || (fenceStart != null && block.start >= fenceStart)
@@ -174,7 +183,7 @@ export function splitMarkdownStream(markdown: string, isStreaming: boolean): Mar
     }
     return {
       key: `${isLiveTail ? 'live' : 'stable'}:${block.start}:${isLiveTail ? '' : hashString(block.src)}`,
-      src: block.src,
+      src: appendReferenceDefinitions(block.src, referenceDefinitions),
       mode: isLiveTail ? ('live' as const) : ('full' as const),
     }
   })

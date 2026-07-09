@@ -11,7 +11,6 @@ interface CodePreviewProps {
   isResizing?: boolean
   isVisible?: boolean
   wordWrap?: boolean
-  remountOnRender?: boolean
   targetLine?: number | null
   targetKey?: string
   targetRanges?: readonly TargetLineRange[]
@@ -24,7 +23,6 @@ export function CodePreview({
   isResizing = false,
   isVisible = true,
   wordWrap,
-  remountOnRender = false,
   targetLine,
   targetKey,
   targetRanges,
@@ -46,7 +44,6 @@ export function CodePreview({
       maxHeight={maxHeight}
       isResizing={isResizing}
       isVisible={isVisible}
-      extraExtensions={remountOnRender ? [] : undefined}
       targetLine={targetLine}
       targetKey={targetKey}
       targetRanges={targetRanges}

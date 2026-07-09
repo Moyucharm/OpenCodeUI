@@ -474,6 +474,51 @@ $$ \begin{aligned} \nabla \cdot \vec{E} &= \rho / \varepsilon_0 \ \nabla \cdot \
     expect(element).not.toHaveAttribute('style')
   })
 
+  it('removes layout-capable raw HTML styles', () => {
+    render(<MarkdownRenderer content={'<div style="position:fixed;inset:0;z-index:999999">overlay</div>'} />)
+
+    expect(screen.getByText('overlay')).not.toHaveAttribute('style')
+  })
+
+  it('keeps external markdown links isolated from the app webview', () => {
+    render(<MarkdownRenderer content={'[site](https://example.com/docs)'} />)
+
+    const link = screen.getByRole('link', { name: 'site' })
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('keeps external markdown image links isolated from the app webview', () => {
+    render(<MarkdownRenderer content={'![avatar](https://example.com/avatar.png)'} />)
+
+    const link = screen.getByRole('img', { name: 'avatar' }).closest('a')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('keeps React code and table renderers when reference definitions are present', () => {
+    const content = [
+      '[OpenCode][docs]',
+      '',
+      '```ts',
+      'const x = 1',
+      '```',
+      '',
+      '| A | B |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '[docs]: https://example.com/docs',
+    ].join('\n')
+
+    render(<MarkdownRenderer content={content} />)
+
+    expect(screen.getByRole('link', { name: 'OpenCode' })).toHaveAttribute('href', 'https://example.com/docs')
+    expect(screen.getByTestId('code-block')).toHaveTextContent('ts:const x = 1')
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getByTestId('copy-button')).toBeInTheDocument()
+  })
+
   it('renders mermaid code fences as diagrams', async () => {
     render(<MarkdownRenderer content={'```mermaid\ngraph TD\n  A-->B\n```'} />)
 

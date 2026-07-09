@@ -179,7 +179,6 @@ export const ChatArea = memo(
       const pendingSessionResetRafRef = useRef<number | null>(null)
       const lastScrollRootSizeRef = useRef({ width: 0, height: 0 })
       const previousActivePagesRef = useRef<{ sessionId?: string | null; pages: StableChatPage[] }>({ pages: [] })
-      const lastStreamingPageKeysRef = useRef<ReadonlySet<string>>(new Set())
       const settlingScrollMessageIdRef = useRef<string | null>(null)
       const loadMoreRequestIdRef = useRef(0)
       const topSentinelVisibleRef = useRef(false)
@@ -278,10 +277,6 @@ export const ChatArea = memo(
         }
         return keys
       }, [activePages])
-
-      useLayoutEffect(() => {
-        lastStreamingPageKeysRef.current = streamingPageKeys
-      }, [streamingPageKeys])
 
       const renderPageSelection = useMemo(
         () =>
@@ -424,7 +419,6 @@ export const ChatArea = memo(
         loadMoreBlockedRef.current = true
         pendingLoadMoreAnchorRef.current = null
         previousActivePagesRef.current = { sessionId, pages: [] }
-        lastStreamingPageKeysRef.current = new Set()
         clearPendingLoadMoreAnchorMessage()
         topSentinelVisibleRef.current = false
         loadMoreRequestIdRef.current += 1

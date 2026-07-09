@@ -10,6 +10,7 @@ type PendingRequest = {
 let worker: Worker | null = null
 let workerReady: Promise<void> | null = null
 let workerReadyPromiseResolve: (() => void) | null = null
+let workerReadyPromiseReject: ((error: unknown) => void) | null = null
 let nextId = 1
 
 const pendingRequests = new Map<number, PendingRequest>()
@@ -23,6 +24,18 @@ function getWorker(): Worker {
     const msg = event.data
     if (msg.type === 'ready') {
       workerReadyPromiseResolve?.()
+      workerReadyPromiseResolve = null
+      workerReadyPromiseReject = null
+      return
+    }
+
+    if (msg.type === 'init-error') {
+      workerReadyPromiseReject?.(new Error(msg.message))
+      workerReady = null
+      workerReadyPromiseResolve = null
+      workerReadyPromiseReject = null
+      worker?.terminate()
+      worker = null
       return
     }
 
@@ -41,10 +54,12 @@ function getWorker(): Worker {
   }
 
   worker.onerror = error => {
+    workerReadyPromiseReject?.(error)
     pendingRequests.forEach(pending => pending.reject(error))
     pendingRequests.clear()
     workerReady = null
     workerReadyPromiseResolve = null
+    workerReadyPromiseReject = null
     worker = null
   }
 
@@ -54,8 +69,9 @@ function getWorker(): Worker {
 export function ensureShikiWorkerReady(): Promise<void> {
   if (workerReady) return workerReady
 
-  workerReady = new Promise(resolve => {
+  workerReady = new Promise((resolve, reject) => {
     workerReadyPromiseResolve = resolve
+    workerReadyPromiseReject = reject
   })
   getWorker().postMessage({ type: 'init', themes: ['github-dark-default', 'github-light-default'] } satisfies WorkerRequest)
   return workerReady

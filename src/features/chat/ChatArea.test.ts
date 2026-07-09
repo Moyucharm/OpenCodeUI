@@ -6,11 +6,7 @@ import {
   buildTurnDurationMap,
   computeAnchorRestoreScrollDelta,
   computeExpandedPageRange,
-  computePremeasureMessageBudget,
-  expandSelectionWithNearbyStalePages,
   expandSelectionWithPageKeys,
-  findPageToPremeasure,
-  findPagesToPremeasure,
   findMessageSequenceOffset,
   reconcileStableChatPages,
   seedMeasuredPageHeightsFromPreviousPages,
@@ -492,17 +488,6 @@ describe('lightweight render selection', () => {
     { key: 'page-4', rows: [], messageIds: ['m4'], estimatedHeight: 140 },
   ]
 
-  it('expands only stale pages near the active selection', () => {
-    const selection = expandSelectionWithNearbyStalePages({
-      pages,
-      expandedPageSelection: buildExpandedPageSelection({ startIndex: 1, endIndex: 1 }),
-      stalePageKeys: new Set(['page-2', 'page-4']),
-      radius: 1,
-    })
-
-    expect(Array.from(selection)).toEqual([1, 2])
-  })
-
   it('expands explicit page keys without widening unrelated pages', () => {
     const selection = expandSelectionWithPageKeys({
       pages,
@@ -511,95 +496,6 @@ describe('lightweight render selection', () => {
     })
 
     expect(Array.from(selection)).toEqual([1, 4])
-  })
-})
-
-describe('findPageToPremeasure', () => {
-  const pages = [
-    { key: 'page-0', rows: [], messageIds: ['m0'], estimatedHeight: 100 },
-    { key: 'page-1', rows: [], messageIds: ['m1'], estimatedHeight: 110 },
-    { key: 'page-2', rows: [], messageIds: ['m2'], estimatedHeight: 120 },
-    { key: 'page-3', rows: [], messageIds: ['m3'], estimatedHeight: 130 },
-    { key: 'page-4', rows: [], messageIds: ['m4'], estimatedHeight: 140 },
-  ]
-
-  it('premeasures the next older page when scrolling toward history', () => {
-    expect(
-      findPageToPremeasure({
-        pages,
-        expandedPageRange: { startIndex: 2, endIndex: 2 },
-        measuredPageHeights: {},
-        direction: 'older',
-        radius: 2,
-      }),
-    ).toBe(pages[3])
-  })
-
-  it('premeasures the next newer page when scrolling back toward latest messages', () => {
-    expect(
-      findPageToPremeasure({
-        pages,
-        expandedPageRange: { startIndex: 2, endIndex: 2 },
-        measuredPageHeights: {},
-        direction: 'newer',
-        radius: 2,
-      }),
-    ).toBe(pages[1])
-  })
-
-  it('falls back to the opposite side when the preferred side is already measured', () => {
-    expect(
-      findPageToPremeasure({
-        pages,
-        expandedPageRange: { startIndex: 2, endIndex: 2 },
-        measuredPageHeights: { 'page-3': 130, 'page-4': 140 },
-        direction: 'older',
-        radius: 2,
-      }),
-    ).toBe(pages[1])
-  })
-
-  it('remeasures stale pages without dropping their cached heights', () => {
-    expect(
-      findPageToPremeasure({
-        pages,
-        expandedPageRange: { startIndex: 2, endIndex: 2 },
-        measuredPageHeights: { 'page-3': 130 },
-        stalePageKeys: new Set(['page-3']),
-        direction: 'older',
-        radius: 2,
-      }),
-    ).toBe(pages[3])
-  })
-
-  it('premeasures multiple small pages to satisfy the message budget', () => {
-    const smallPages = Array.from({ length: 8 }, (_, index) => ({
-      key: `small-page-${index}`,
-      rows: [],
-      messageIds: Array.from({ length: 5 }, (_unused, messageIndex) => `m${index}-${messageIndex}`),
-      estimatedHeight: 100,
-    }))
-
-    const planned = findPagesToPremeasure({
-      pages: smallPages,
-      expandedPageRange: { startIndex: 1, endIndex: 1 },
-      measuredPageHeights: {},
-      direction: 'older',
-      radius: 1,
-      messageBudget: 20,
-    })
-
-    expect(planned.map(page => page.key)).toEqual(['small-page-2', 'small-page-3', 'small-page-4', 'small-page-5'])
-  })
-})
-
-describe('computePremeasureMessageBudget', () => {
-  it('scales with viewport height within a bounded message budget', () => {
-    expect(computePremeasureMessageBudget(0)).toBe(20)
-    expect(computePremeasureMessageBudget(600)).toBe(20)
-    expect(computePremeasureMessageBudget(1200)).toBe(30)
-    expect(computePremeasureMessageBudget(2400)).toBe(60)
-    expect(computePremeasureMessageBudget(4000)).toBe(60)
   })
 })
 

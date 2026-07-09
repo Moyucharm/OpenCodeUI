@@ -40,6 +40,7 @@ export type WorkerResponse =
     }
   | { type: 'error'; id: number; key: string; message: string }
   | { type: 'superseded'; id: number; key: string }
+  | { type: 'init-error'; message: string }
   | { type: 'ready' }
 
 type Stream = {
@@ -220,7 +221,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       themes: msg.themes.map(t => themeLoaders[t]?.() ?? themeLoaders['github-dark-default']!()) as Parameters<typeof createHighlighterCore>[0]['themes'],
       langs: [],
     })
-    void highlighter.then(() => post({ type: 'ready' }))
+    void highlighter
+      .then(() => post({ type: 'ready' }))
+      .catch(error => post({ type: 'init-error', message: error instanceof Error ? error.message : String(error) }))
     return
   }
   if (msg.type === 'dispose') {

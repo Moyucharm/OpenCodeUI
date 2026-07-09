@@ -190,7 +190,7 @@ export const ContentBlock = memo(function ContentBlock({
       )
     }
     if (content?.trim()) {
-      return <CodePreview code={content} language={lang} remountOnRender />
+      return <CodePreview code={content} language={lang} />
     }
     return null
   }, [content, diffViewerData, fullscreenDiffViewMode, isDiff, lang, resolvedDiff, stateKey])
@@ -372,7 +372,6 @@ export const ContentBlock = memo(function ContentBlock({
                   language={lang}
                   maxHeight={maxHeight}
                   isVisible={showBody}
-                  remountOnRender
                 />
               ) : null}
             </div>
