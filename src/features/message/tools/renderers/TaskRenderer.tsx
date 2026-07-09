@@ -25,14 +25,13 @@ const EMPTY_MESSAGES: Message[] = []
 // 4. 按需交互 - 输入框只在需要时显示
 // ============================================
 
-export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChange, measureOnly }: ToolRendererProps) {
+export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChange }: ToolRendererProps) {
   const { t } = useTranslation('message')
   const { currentSessionId, currentDirectory } = useSessionNavigation()
   const { state } = part
   const [expanded, setExpanded] = useUiDisclosureState(
     `message:${part.messageID}:tool:${part.id}:task-body`,
     state.status === 'running' || state.status === 'pending',
-    { readOnly: measureOnly },
   )
   const [isContentFullscreen, setIsContentFullscreen] = useState(false)
   const effectiveExpanded = expanded || isContentFullscreen
@@ -56,11 +55,10 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
 
   const handleContentFullscreenChange = useCallback(
     (isFullscreen: boolean) => {
-      if (measureOnly) return
       setIsContentFullscreen(isFullscreen)
       onFullscreenChange?.(isFullscreen)
     },
-    [measureOnly, onFullscreenChange],
+    [onFullscreenChange],
   )
 
   // Stop handler
@@ -79,7 +77,6 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
 
   // 运行时自动展开
   useEffect(() => {
-    if (measureOnly) return
     let frameId: number | null = null
 
     if (isRunning) {
@@ -91,7 +88,7 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
     return () => {
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
-  }, [isRunning, measureOnly, setExpanded])
+  }, [isRunning, setExpanded])
 
   return (
     <div className="min-w-0">
@@ -127,7 +124,7 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
                 {targetSessionId && (
                   <>
                     {prompt && <hr className="border-border-200/30" />}
-                    <SubSessionView sessionId={targetSessionId} isParentRunning={isRunning} measureOnly={measureOnly} />
+                    <SubSessionView sessionId={targetSessionId} isParentRunning={isRunning} />
                   </>
                 )}
 
@@ -140,7 +137,6 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
                     defaultCollapsed={true}
                     onFullscreenChange={handleContentFullscreenChange}
                     fullscreenId={`task:${part.sessionID}:${part.messageID}:${part.id}:result`}
-                    measureOnly={measureOnly}
                   />
                 )}
 
@@ -153,7 +149,6 @@ export const TaskRenderer = memo(function TaskRenderer({ part, onFullscreenChang
                     variant="error"
                     onFullscreenChange={handleContentFullscreenChange}
                     fullscreenId={`task:${part.sessionID}:${part.messageID}:${part.id}:error`}
-                    measureOnly={measureOnly}
                   />
                 )}
               </div>
@@ -306,10 +301,9 @@ const TaskHeader = memo(function TaskHeader({
 interface SubSessionViewProps {
   sessionId: string
   isParentRunning: boolean
-  measureOnly?: boolean
 }
 
-const SubSessionView = memo(function SubSessionView({ sessionId, measureOnly = false }: SubSessionViewProps) {
+const SubSessionView = memo(function SubSessionView({ sessionId }: SubSessionViewProps) {
   const { t } = useTranslation('message')
   const scrollRef = useRef<HTMLDivElement>(null)
   const loadedRef = useRef(false)
@@ -323,7 +317,6 @@ const SubSessionView = memo(function SubSessionView({ sessionId, measureOnly = f
 
   // 挂载即加载（SubSessionView 只在 task 展开时才渲染，loadedRef 防止重复请求）
   useEffect(() => {
-    if (measureOnly) return
     if (loadedRef.current) return
 
     const state = messageStore.getSessionState(sessionId)
@@ -351,7 +344,7 @@ const SubSessionView = memo(function SubSessionView({ sessionId, measureOnly = f
         sessionErrorHandler('load sub-session', err)
         messageStore.setLoadState(sessionId, 'error')
       })
-  }, [measureOnly, sessionId])
+  }, [sessionId])
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current

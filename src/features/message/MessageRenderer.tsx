@@ -44,7 +44,6 @@ import { useUiDisclosureState } from '../../utils/uiDisclosureState'
 interface MessageRendererProps {
   message: Message
   allowStreamingLayoutAnimation?: boolean
-  measureOnly?: boolean
   /** 回合总时长（毫秒），仅在回合最后一条 assistant 消息上有值 */
   turnDuration?: number
   onUndo?: (userMessageId: string) => void
@@ -57,7 +56,6 @@ interface MessageRendererProps {
 export const MessageRenderer = memo(function MessageRenderer({
   message,
   allowStreamingLayoutAnimation = true,
-  measureOnly = false,
   turnDuration,
   onUndo,
   onFork,
@@ -76,7 +74,6 @@ export const MessageRenderer = memo(function MessageRenderer({
         onFork={onFork}
         forkMessageId={forkMessageId}
         canUndo={canUndo}
-        measureOnly={measureOnly}
       />
     )
   }
@@ -85,7 +82,6 @@ export const MessageRenderer = memo(function MessageRenderer({
     <AssistantMessageView
       message={message}
       allowStreamingLayoutAnimation={allowStreamingLayoutAnimation}
-      measureOnly={measureOnly}
       turnDuration={turnDuration}
       onFork={onFork}
       forkMessageId={forkMessageId}
@@ -98,10 +94,9 @@ export const MessageRenderer = memo(function MessageRenderer({
 // 入场生长动画 hook — 新消息作为对话流的延续，从 height 0 平滑展开
 // ============================================
 
-function useEntryGrowAnimation(created: number, enabled = true) {
+function useEntryGrowAnimation(created: number) {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    if (!enabled) return
     const el = ref.current
     if (!el || Date.now() - created > 3000) return
     const targetHeight = el.scrollHeight
@@ -111,7 +106,7 @@ function useEntryGrowAnimation(created: number, enabled = true) {
       el.style.height = ''
       el.style.clipPath = ''
     })
-  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return ref
 }
 
@@ -130,20 +125,16 @@ const CollapsibleUserText = memo(function CollapsibleUserText({
   collapseEnabled,
   renderMarkdown,
   messageId,
-  measureOnly = false,
 }: {
   text: string
   collapseEnabled: boolean
   renderMarkdown: boolean
   messageId: string
-  measureOnly?: boolean
 }) {
   const { t } = useTranslation('message')
   const contentRef = useRef<HTMLDivElement>(null)
   const overflowCacheKey = `${messageId}:${renderMarkdown ? 'markdown' : 'plain'}`
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${messageId}:user-text`, false, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${messageId}:user-text`, false)
   const [isOverflow, setIsOverflow] = useState(() => overflowStateCache.get(overflowCacheKey) ?? false)
 
   useLayoutEffect(() => {
@@ -256,7 +247,6 @@ interface UserMessageViewProps {
   onFork?: (message: Message, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
   canUndo?: boolean
-  measureOnly?: boolean
 }
 
 const UserMessageView = memo(function UserMessageView({
@@ -265,19 +255,17 @@ const UserMessageView = memo(function UserMessageView({
   onFork,
   forkMessageId,
   canUndo,
-  measureOnly = false,
 }: UserMessageViewProps) {
   const { t } = useTranslation('message')
   const { parts, info } = message
   const [showSystemContext, setShowSystemContext] = useUiDisclosureState(
     `message:${info.id}:user-system-context`,
     false,
-    { readOnly: measureOnly },
   )
   const shouldRenderSystemContext = useDelayedRender(showSystemContext)
   const { collapseUserMessages, renderUserMarkdown } = useTheme()
 
-  const wrapperRef = useEntryGrowAnimation(info.time.created, !measureOnly)
+  const wrapperRef = useEntryGrowAnimation(info.time.created)
 
   // 分离不同类型的 parts
   const textParts = parts.filter((p): p is TextPart => p.type === 'text' && !p.synthetic)
@@ -299,7 +287,6 @@ const UserMessageView = memo(function UserMessageView({
             collapseEnabled={collapseUserMessages}
             renderMarkdown={renderUserMarkdown}
             messageId={info.id}
-            measureOnly={measureOnly}
           />
         )}
 
@@ -384,7 +371,6 @@ const UserMessageView = memo(function UserMessageView({
 const AssistantMessageView = memo(function AssistantMessageView({
   message,
   allowStreamingLayoutAnimation = true,
-  measureOnly = false,
   turnDuration,
   onFork,
   forkMessageId,
@@ -392,7 +378,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
 }: {
   message: Message
   allowStreamingLayoutAnimation?: boolean
-  measureOnly?: boolean
   turnDuration?: number
   onFork?: (message: Message, forkMessageId?: string) => Promise<void> | void
   forkMessageId?: string
@@ -402,14 +387,13 @@ const AssistantMessageView = memo(function AssistantMessageView({
   const { parts, isStreaming, info } = message
   const { stepFinishDisplay, completedAtFormat } = useTheme()
 
-  const wrapperRef = useEntryGrowAnimation(info.time.created, !measureOnly)
+  const wrapperRef = useEntryGrowAnimation(info.time.created)
 
   useEffect(() => {
-    if (measureOnly) return
     if (parts.length === 0 && onEnsureParts) {
       onEnsureParts(message.info.id)
     }
-  }, [measureOnly, parts.length, onEnsureParts, message.info.id])
+  }, [parts.length, onEnsureParts, message.info.id])
 
   // 收集连续的 tool parts 合并渲染
   const renderItems = useMemo(() => groupPartsForRender(parts), [parts])
@@ -462,7 +446,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
     if (messageError) {
       return (
         <div className="flex flex-col gap-2 w-full">
-          <MessageErrorView error={messageError} stateKey={`message:${message.info.id}:error`} measureOnly={measureOnly} />
+          <MessageErrorView error={messageError} stateKey={`message:${message.info.id}:error`} />
         </div>
       )
     }
@@ -496,7 +480,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
                   agent={agent}
                   modelLabel={modelLabel}
                   completedAt={isLastStepFinish ? completed : undefined}
-                  measureOnly={measureOnly}
                 />
               )
             }
@@ -512,7 +495,6 @@ const AssistantMessageView = memo(function AssistantMessageView({
                     key={part.id}
                     part={part}
                     isStreaming={isStreaming && !reasoningDone}
-                    measureOnly={measureOnly}
                   />
                 )
               }
@@ -529,9 +511,9 @@ const AssistantMessageView = memo(function AssistantMessageView({
                   />
                 )
               case 'subtask':
-                return <SubtaskPartView key={part.id} part={part} measureOnly={measureOnly} />
+                return <SubtaskPartView key={part.id} part={part} />
               case 'retry':
-                return <RetryPartView key={part.id} part={part} measureOnly={measureOnly} />
+                return <RetryPartView key={part.id} part={part} />
               case 'compaction':
                 return <CompactionPartView key={part.id} part={part} />
               default:
@@ -542,7 +524,7 @@ const AssistantMessageView = memo(function AssistantMessageView({
       </SmoothHeight>
 
       {/* Message-level error */}
-      {messageError && <MessageErrorView error={messageError} stateKey={`message:${info.id}:error`} measureOnly={measureOnly} />}
+      {messageError && <MessageErrorView error={messageError} stateKey={`message:${info.id}:error`} />}
 
       {(showTurnDurationFooter || showCompletedAtFooter) && (
         <div className="flex items-center gap-3 py-0.5 text-[length:var(--fs-xxs)] text-text-500">
@@ -578,7 +560,6 @@ interface ToolGroupProps {
   agent?: string
   modelLabel?: string
   completedAt?: number
-  measureOnly?: boolean
 }
 
 /** 用户需要阅读/交互的工具：沉浸模式下这些工具完成后保持展开 */
@@ -597,7 +578,6 @@ const ToolGroup = memo(function ToolGroup({
   agent,
   modelLabel,
   completedAt,
-  measureOnly = false,
 }: ToolGroupProps) {
   const { t } = useTranslation('message')
   const { descriptiveToolSteps, inlineToolRequests, immersiveMode } = useTheme()
@@ -646,13 +626,10 @@ const ToolGroup = memo(function ToolGroup({
   // descriptive 模式默认收起，运行时展开，完成后保持展开
   // 沉浸模式下：没有可读工具则完成后自动收起
   const groupStateKey = `message:${parts[0]?.messageID || 'unknown'}:tool-group:${parts[0]?.id || 'empty'}`
-  const [expanded, setExpanded] = useUiDisclosureState(groupStateKey, shouldStartExpanded, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(groupStateKey, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && hasReadableTools)
 
   useEffect(() => {
-    if (measureOnly) return
     if (!descriptiveToolSteps) return
     // 沉浸模式下没有可读工具：始终收起，不展开
     if (immersiveMode && !hasReadableTools) {
@@ -678,7 +655,6 @@ const ToolGroup = memo(function ToolGroup({
     immersiveMode,
     hasReadableTools,
     isStreaming,
-    measureOnly,
     setExpanded,
   ])
 
@@ -772,7 +748,6 @@ const ToolGroup = memo(function ToolGroup({
                   compact={isSingleCompact}
                   descriptive={descriptiveToolSteps}
                   isStreaming={isStreaming}
-                  measureOnly={measureOnly}
                 />
               ))}
           </div>

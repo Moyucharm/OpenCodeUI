@@ -53,8 +53,6 @@ export interface ContentBlockProps {
   fullscreenId?: string
   /** 折叠状态缓存 key。消息流内传入稳定 key，避免流式刷新重置用户操作。 */
   stateKey?: string
-  /** Hidden measurement render: keep markup, skip global UI state writes/fullscreen updates. */
-  measureOnly?: boolean
 
   // 内容
   /** 普通文本/代码内容 */
@@ -91,7 +89,6 @@ export const ContentBlock = memo(function ContentBlock({
   onFullscreenChange,
   fullscreenId,
   stateKey,
-  measureOnly = false,
   content,
   diff,
   diffStats: providedDiffStats,
@@ -105,7 +102,6 @@ export const ContentBlock = memo(function ContentBlock({
   const [cachedCollapsed, setCachedCollapsed] = useUiDisclosureState(
     stateKey ?? `content-block:${generatedFullscreenId}`,
     compact ? false : defaultCollapsed,
-    { readOnly: measureOnly },
   )
   const [diffViewMode, setDiffViewMode] = useState<ViewMode>('split')
   const [fullscreenDiffViewMode, setFullscreenDiffViewMode] = useState<ViewMode>('split')
@@ -200,7 +196,6 @@ export const ContentBlock = memo(function ContentBlock({
   }, [content, diffViewerData, fullscreenDiffViewMode, isDiff, lang, resolvedDiff, stateKey])
 
   const fullscreenLayer = useMemo(() => {
-    if (measureOnly) return null
     if (!fullscreenContent) return null
     return {
       id: resolvedFullscreenId,
@@ -217,23 +212,20 @@ export const ContentBlock = memo(function ContentBlock({
     fullscreenTitleExtra,
     isDiff,
     label,
-    measureOnly,
     resolvedDiff,
     resolvedFullscreenId,
   ])
   const { isOpen: fullscreenOpen, open: openFullscreen } = useFullscreenLayer(fullscreenLayer)
 
   useEffect(() => {
-    if (measureOnly) return
     onFullscreenChange?.(fullscreenOpen)
     return () => {
       if (fullscreenOpen) onFullscreenChange?.(false)
     }
-  }, [fullscreenOpen, measureOnly, onFullscreenChange])
+  }, [fullscreenOpen, onFullscreenChange])
 
   // 自动响应式切换 diff view mode
   useEffect(() => {
-    if (measureOnly) return
     if (!isDiff) return
     const container = contentRef.current
     if (!container) return
@@ -248,17 +240,16 @@ export const ContentBlock = memo(function ContentBlock({
     const observer = new ResizeObserver(updateViewMode)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [isDiff, measureOnly])
+  }, [isDiff])
 
   // 全屏时响应式切换 diff view mode
   useEffect(() => {
-    if (measureOnly) return
     if (!fullscreenOpen || !isDiff) return
     const checkWidth = () => setFullscreenDiffViewMode(window.innerWidth >= 1000 ? 'split' : 'unified')
     checkWidth()
     window.addEventListener('resize', checkWidth)
     return () => window.removeEventListener('resize', checkWidth)
-  }, [fullscreenOpen, isDiff, measureOnly])
+  }, [fullscreenOpen, isDiff])
 
   // 是否展开内容区
   const showBody = (hasContent && !collapsed) || (isLoading && !hasContent)
@@ -373,7 +364,7 @@ export const ContentBlock = memo(function ContentBlock({
                   viewMode={diffViewMode}
                   maxHeight={maxHeight}
                   data={diffViewerData}
-                  stateKey={!measureOnly && stateKey ? `${stateKey}:diff` : undefined}
+                  stateKey={stateKey ? `${stateKey}:diff` : undefined}
                 />
               ) : content?.trim() ? (
                 <CodePreview

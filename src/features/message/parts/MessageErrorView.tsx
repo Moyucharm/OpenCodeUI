@@ -9,20 +9,17 @@ import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 interface MessageErrorViewProps {
   error: MessageError
   stateKey?: string
-  measureOnly?: boolean
 }
 
 /**
  * 消息级别的错误显示（紧凑折叠式）
  * 用于 AssistantMessage 的 error 字段
  */
-export const MessageErrorView = memo(function MessageErrorView({ error, stateKey, measureOnly = false }: MessageErrorViewProps) {
+export const MessageErrorView = memo(function MessageErrorView({ error, stateKey }: MessageErrorViewProps) {
   const { t } = useTranslation('message')
   const { title, description, details, severity } = getErrorInfo(error, t)
   const hasDetails = !!(details || description)
-  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `message-error:${title}`, false, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(stateKey ?? `message-error:${title}`, false)
   const shouldRenderBody = useDelayedRender(expanded)
 
   const colorClass = severity === 'error' ? 'text-danger-100' : 'text-warning-100'

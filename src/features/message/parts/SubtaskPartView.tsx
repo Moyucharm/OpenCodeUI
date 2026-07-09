@@ -9,7 +9,6 @@ import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 
 interface SubtaskPartViewProps {
   part: SubtaskPart
-  measureOnly?: boolean
 }
 
 /**
@@ -19,11 +18,9 @@ interface SubtaskPartViewProps {
  * 1. 折叠/展开查看进度
  * 2. 点击进入子 session 全屏视图
  */
-export const SubtaskPartView = memo(function SubtaskPartView({ part, measureOnly = false }: SubtaskPartViewProps) {
+export const SubtaskPartView = memo(function SubtaskPartView({ part }: SubtaskPartViewProps) {
   const { t } = useTranslation('message')
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:subtask:${part.id}`, false, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:subtask:${part.id}`, false)
   const shouldRenderBody = useDelayedRender(expanded)
   const { navigateToSession } = useSessionNavigation()
 

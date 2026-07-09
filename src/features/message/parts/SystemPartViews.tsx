@@ -11,14 +11,11 @@ import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 
 interface RetryPartViewProps {
   part: RetryPart
-  measureOnly?: boolean
 }
 
-export const RetryPartView = memo(function RetryPartView({ part, measureOnly = false }: RetryPartViewProps) {
+export const RetryPartView = memo(function RetryPartView({ part }: RetryPartViewProps) {
   const { t } = useTranslation('message')
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:retry:${part.id}`, false, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:retry:${part.id}`, false)
   const shouldRenderBody = useDelayedRender(expanded)
   const { attempt, error, time } = part
 
@@ -99,14 +96,11 @@ export const CompactionPartView = memo(function CompactionPartView({ part }: Com
 
 interface PatchPartViewProps {
   part: PatchPart
-  measureOnly?: boolean
 }
 
-export const PatchPartView = memo(function PatchPartView({ part, measureOnly = false }: PatchPartViewProps) {
+export const PatchPartView = memo(function PatchPartView({ part }: PatchPartViewProps) {
   const { t } = useTranslation('message')
-  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:patch:${part.id}`, false, {
-    readOnly: measureOnly,
-  })
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:patch:${part.id}`, false)
   const shouldRenderBody = useDelayedRender(expanded)
   const { hash, files } = part
   const fileCount = files.length
