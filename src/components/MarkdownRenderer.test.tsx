@@ -474,10 +474,12 @@ $$ \begin{aligned} \nabla \cdot \vec{E} &= \rho / \varepsilon_0 \ \nabla \cdot \
     expect(element).not.toHaveAttribute('style')
   })
 
-  it('removes layout-capable raw HTML styles', () => {
-    render(<MarkdownRenderer content={'<div style="position:fixed;inset:0;z-index:999999">overlay</div>'} />)
+  it('preserves safe inline styles in raw HTML', () => {
+    render(<MarkdownRenderer content={'<div style="color:red;font-weight:bold">styled</div>'} />)
 
-    expect(screen.getByText('overlay')).not.toHaveAttribute('style')
+    const element = screen.getByText('styled')
+    expect(element).toHaveAttribute('style')
+    expect(element.getAttribute('style')).toMatch(/color:\s*red/i)
   })
 
   it('keeps external markdown links isolated from the app webview', () => {

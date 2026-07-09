@@ -417,13 +417,20 @@ function sanitizeHtml(html: string): string {
   const clean = DOMPurify.sanitize(stripUnsafeHtmlLinks(rewriteRawHtmlLocalLinks(html)), {
     USE_PROFILES: { html: true, mathMl: true, svg: true },
     FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
-    FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
   }) as unknown as string
 
   if (typeof document === 'undefined') return clean
 
   const template = document.createElement('template')
   template.innerHTML = clean
+
+  template.content.querySelectorAll<HTMLElement>('[style]').forEach(element => {
+    const style = element.getAttribute('style') ?? ''
+    if (/url\s*\(|expression\s*\(|behavior\s*:|-moz-binding\s*:/i.test(style)) {
+      element.removeAttribute('style')
+    }
+  })
 
   template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(anchor => {
     const href = anchor.getAttribute('href') ?? ''
