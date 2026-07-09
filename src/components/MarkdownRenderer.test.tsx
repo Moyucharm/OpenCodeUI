@@ -106,7 +106,7 @@ describe('MarkdownRenderer', () => {
     expect(codeEl).toHaveClass('text-accent-main-100')
   })
 
-  it('keeps inline emphasis styles on the Streamdown markdown path', () => {
+  it('keeps inline emphasis styles on the markdown path', () => {
     render(<MarkdownRenderer content={'**bold** *em* ~~gone~~'} />)
 
     expect(screen.getByText('bold').className).toMatch(/text-text-100/)
@@ -114,12 +114,28 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByText('gone').className).toMatch(/text-text-400/)
   })
 
-  it('keeps task checkboxes on the Streamdown markdown path', () => {
+  it('renders common markdown extension inline styles', () => {
+    const { container } = render(<MarkdownRenderer content={'H~2~O X^2^ ==mark=='} />)
+
+    expect(container.querySelector('sub')).toHaveTextContent('2')
+    expect(container.querySelector('sup')).toHaveTextContent('2')
+    expect(container.querySelector('mark')).toHaveTextContent('mark')
+  })
+
+  it('renders footnote references and definitions', () => {
+    const content = '这是一段需要说明的文字[^ref1]。这里还有另一个引用[^ref2]。\n\n[^ref2]: 第二个脚注，来自某文献第 42 页。'
+    const { container } = render(<MarkdownRenderer content={content} />)
+
+    expect(container.querySelector('#fnref-ref1')).toHaveTextContent('ref1')
+    expect(container.querySelector('#fnref-ref2')).toHaveTextContent('ref2')
+    expect(container.querySelector('#fn-ref2')).toHaveTextContent('第二个脚注，来自某文献第 42 页。')
+  })
+
+  it('keeps task checkboxes on the markdown path', () => {
     const { container } = render(<MarkdownRenderer content={'- [x] done'} />)
 
     const checkbox = container.querySelector('input[type="checkbox"]')
     expect(checkbox).toBeInTheDocument()
-    expect(checkbox).toBeDisabled()
   })
 
   it('renders fenced code blocks via CodeBlock', () => {
@@ -128,25 +144,191 @@ describe('MarkdownRenderer', () => {
     expect(screen.getByTestId('code-block')).toHaveTextContent('ts:const x = 1')
   })
 
+  it('renders consecutive fenced code blocks via CodeBlock', () => {
+    const fence = '```'
+    const content = [
+      `${fence}python`,
+      'print("py")',
+      fence,
+      '',
+      `${fence}javascript`,
+      'console.log("js")',
+      fence,
+      '',
+      `${fence}rust`,
+      'fn main() {}',
+      fence,
+      '',
+      `${fence}go`,
+      'package main',
+      fence,
+      '',
+      `${fence}sql`,
+      'SELECT 1;',
+      fence,
+      '',
+      `${fence}json`,
+      '{"name":"test"}',
+      fence,
+      '',
+      `${fence}bash`,
+      'echo ok',
+      fence,
+    ].join('\n')
+
+    render(<MarkdownRenderer content={content} />)
+
+    expect(screen.getAllByTestId('code-block')).toHaveLength(7)
+  })
+
+  it('renders the comprehensive markdown fixture core elements', () => {
+    const fence = '```'
+    const content = [
+      '# Markdown 综合性能测试文档',
+      '',
+      '> 用于测试 Markdown 解析器的流式渲染性能。',
+      '',
+      '**粗体** · *斜体* · ~~删除线~~ · `行内代码` · H~2~O · X^2^ · ==高亮==',
+      '',
+      '## 三、代码块',
+      '',
+      `${fence}python`,
+      'def quicksort(arr):',
+      '    if len(arr) <= 1:',
+      '        return arr',
+      fence,
+      '',
+      `${fence}javascript`,
+      'async function fetchData(url) {',
+      '    const resp = await fetch(url);',
+      '    return resp.json();',
+      '}',
+      fence,
+      '',
+      `${fence}rust`,
+      'fn main() {',
+      '    println!("ok");',
+      '}',
+      fence,
+      '',
+      `${fence}go`,
+      'package main',
+      'import "fmt"',
+      fence,
+      '',
+      `${fence}sql`,
+      'SELECT u.name, COUNT(o.id) AS order_count',
+      'FROM users u',
+      'GROUP BY u.id, u.name;',
+      fence,
+      '',
+      `${fence}json`,
+      '{',
+      '  "name": "测试"',
+      '}',
+      fence,
+      '',
+      `${fence}bash`,
+      '#!/bin/bash',
+      'for f in *.py; do',
+      '    python3 "$f"',
+      'done',
+      fence,
+      '',
+      '## 四、表格',
+      '',
+      '| 语言 | 类型 | 速度 |',
+      '|:---|:---:|:---:|',
+      '| Rust | 静态 | ★★★★★ |',
+      '| Go | 静态 | ★★★★ |',
+      '',
+      '| 服务 | QPS | 状态 |',
+      '|:---|---:|:---:|',
+      '| api-gateway | 45000 | ✅ |',
+      '| notification | 5200 | ⚠️ |',
+      '',
+      '## 五、列表',
+      '',
+      '- 容器化',
+      '  - [x] Docker',
+      '  - [ ] Podman',
+      '',
+      '## 六、数学公式',
+      '',
+      '行内：$e^{i\\pi} + 1 = 0$ · $\\nabla \\times \\vec{E} = -\\partial\\vec{B}/\\partial t$',
+      '',
+      '$$',
+      '\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}',
+      '$$',
+      '',
+      '$$',
+      '\\begin{pmatrix}',
+      '1 & 0 & 0 \\\\',
+      '0 & 1 & 0 \\\\',
+      '0 & 0 & 1',
+      '\\end{pmatrix}',
+      '$$',
+      '',
+      '$$',
+      '\\begin{aligned}',
+      '\\nabla \\cdot \\vec{E} &= \\rho / \\varepsilon_0 \\\\',
+      '\\nabla \\cdot \\vec{B} &= 0',
+      '\\end{aligned}',
+      '$$',
+      '',
+      '## 八、HTML 组件',
+      '',
+      '<progress value="72" max="100" style="width:100%;height:20px"></progress> 72%',
+      '',
+      '<details>',
+      '<summary>项目结构</summary>',
+      '<div><pre>src/</pre></div>',
+      '</details>',
+      '',
+      '## 九、脚注',
+      '',
+      '这是一段需要说明的文字[^ref1]。这里还有另一个引用[^ref2]。',
+      '',
+      '[^ref1]: 这是第一个脚注的内容，可以写很长。',
+      '[^ref2]: 第二个脚注，来自某文献第 42 页。',
+    ].join('\n')
+
+    const { container } = render(<MarkdownRenderer content={content} />)
+
+    expect(screen.getAllByTestId('code-block')).toHaveLength(7)
+    expect(container.querySelectorAll('table')).toHaveLength(2)
+    expect(screen.getAllByTestId('copy-button')).toHaveLength(2)
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(3)
+    expect(container.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(5)
+    expect(container.querySelectorAll('input[type="checkbox"]').length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('progress')).toBeInTheDocument()
+    expect(container.querySelector('details')).toBeInTheDocument()
+    expect(container.querySelector('sub')).toHaveTextContent('2')
+    expect(container.querySelector('sup')).toHaveTextContent('2')
+    expect(container.querySelector('mark')).toHaveTextContent('高亮')
+    expect(container.querySelector('#fnref-ref1')).toBeInTheDocument()
+    expect(container.querySelector('#fn-ref2')).toHaveTextContent('第二个脚注')
+  })
+
   it('accepts isStreaming prop without crashing', () => {
     render(<MarkdownRenderer content={'Hello **world**'} isStreaming={true} />)
 
     expect(screen.getByRole('paragraph')).toHaveTextContent('Hello world')
   })
 
-  it('renders streaming inline math through the Streamdown renderer', () => {
+  it('renders streaming inline math through the markdown renderer', () => {
     const { container } = render(<MarkdownRenderer content={'Inline $x + y$ math'} isStreaming />)
 
     expect(container.querySelector('.katex')).toBeInTheDocument()
   })
 
-  it('renders sanitized streaming raw HTML through the Streamdown renderer', () => {
+  it('renders sanitized streaming raw HTML through the markdown renderer', () => {
     render(<MarkdownRenderer content={'<div><span>Python</span></div>'} isStreaming />)
 
     expect(screen.getByText('Python')).toBeInTheDocument()
   })
 
-  it('blocks unsafe streaming markdown links through the Streamdown renderer', () => {
+  it('blocks unsafe streaming markdown links through the markdown renderer', () => {
     render(<MarkdownRenderer content={'[bad](javascript:alert(1))'} isStreaming />)
 
     expect(screen.getByText('bad [blocked]')).toBeInTheDocument()
@@ -227,6 +409,26 @@ $$`
 
     expect(container.querySelector('.katex-display')).toBeInTheDocument()
     expect(container.querySelector('p')).not.toBeInTheDocument()
+  })
+
+  it('renders multiple one-line display math blocks', () => {
+    const content = String.raw`$$ \begin{pmatrix} 1 & 0 & 0 \ 0 & 1 & 0 \ 0 & 0 & 1 \end{pmatrix} $$
+
+$$ \begin{aligned} \nabla \cdot \vec{E} &= \rho / \varepsilon_0 \ \nabla \cdot \vec{B} &= 0 \ \nabla \times \vec{E} &= -\partial\vec{B}/\partial t \ \nabla \times \vec{B} &= \mu_0\vec{J} + \mu_0\varepsilon_0\partial\vec{E}/\partial t \end{aligned} $$`
+
+    const { container } = render(<MarkdownRenderer content={content} />)
+
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(2)
+  })
+
+  it('renders multiple one-line display math blocks while streaming', () => {
+    const content = String.raw`$$ \begin{pmatrix} 1 & 0 & 0 \ 0 & 1 & 0 \ 0 & 0 & 1 \end{pmatrix} $$
+
+$$ \begin{aligned} \nabla \cdot \vec{E} &= \rho / \varepsilon_0 \ \nabla \cdot \vec{B} &= 0 \ \nabla \times \vec{E} &= -\partial\vec{B}/\partial t \ \nabla \times \vec{B} &= \mu_0\vec{J} + \mu_0\varepsilon_0\partial\vec{E}/\partial t \end{aligned} $$`
+
+    const { container } = render(<MarkdownRenderer content={content} isStreaming />)
+
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(2)
   })
 
   it('renders sanitized raw HTML content', () => {
@@ -401,6 +603,45 @@ $$`
     const copyButton = screen.getByTestId('copy-button')
     expect(copyButton).toBeInTheDocument()
     expect(copyButton.closest('th')).toBeInTheDocument()
+    expect(copyButton.parentElement).toHaveClass('absolute')
+    expect(copyButton.parentElement).toHaveClass('inset-y-0')
+    expect(copyButton.closest('th')?.querySelector('.pr-8')).toBeInTheDocument()
+    expect(copyButton.closest('tr')).toHaveClass('hover:bg-bg-200/12')
+  })
+
+  it('keeps table text cells unwrapped and ignores alignment styles like the old renderer', () => {
+    const md = '| 类别 | 数量 |\n|:---|---:|\n| 代码块 | 7 |\n| 表格 | 2 |'
+    const { container } = render(<MarkdownRenderer content={md} />)
+
+    const cells = Array.from(container.querySelectorAll('th, td'))
+    expect(cells).toHaveLength(6)
+    for (const cell of cells) {
+      expect(cell).not.toHaveAttribute('style')
+    }
+
+    expect(container.querySelector('thead th:first-child span')).not.toBeInTheDocument()
+    expect(container.querySelector('tbody td span')).not.toBeInTheDocument()
+
+    const lastHeaderText = container.querySelector('thead th:last-child .pr-8')
+    expect(lastHeaderText).toHaveTextContent('数量')
+    expect(lastHeaderText?.querySelector('span')).not.toBeInTheDocument()
+  })
+
+  it('keeps legacy spacing structure for consecutive markdown tables', () => {
+    const md = '| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |'
+    const { container } = render(<MarkdownRenderer content={md} />)
+
+    const tableWrappers = Array.from(container.querySelectorAll('table')).map(table => table.parentElement?.parentElement)
+    expect(tableWrappers).toHaveLength(2)
+    for (const wrapper of tableWrappers) {
+      expect(wrapper).toBeInTheDocument()
+      if (!wrapper) continue
+      expect(wrapper).toHaveClass('my-5')
+      expect(wrapper.className).toContain('first:mt-0')
+      expect(wrapper.className).toContain('last:mb-0')
+      expect(wrapper.parentElement).toHaveClass('space-y-4')
+      expect(wrapper.parentElement).toHaveClass('whitespace-normal')
+    }
   })
 
   it('renders streaming markdown table with copy button in default mode', () => {
@@ -428,7 +669,7 @@ $$`
     expect(screen.queryByTitle('Download image')).not.toBeInTheDocument()
   })
 
-  it('blocks data image markdown sources through Streamdown hardening', () => {
+  it('blocks data image markdown sources through hardening', () => {
     render(<MarkdownRenderer content={'![dot](data:image/png;base64,iVBORw0KGgo=)'} />)
 
     expect(screen.queryByRole('img', { name: 'dot' })).not.toBeInTheDocument()

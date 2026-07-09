@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { projectMarkdownStream, splitMarkdownStream } from './markdownStream'
 
 describe('splitMarkdownStream', () => {
-  it('keeps non-streaming markdown as one full block', () => {
+  it('splits non-streaming markdown into full and code blocks', () => {
     expect(splitMarkdownStream('before\n\n```ts\nconst x = 1', false)).toEqual([
-      expect.objectContaining({ src: 'before\n\n```ts\nconst x = 1', mode: 'full' }),
+      expect.objectContaining({ src: 'before\n\n', mode: 'full' }),
+      expect.objectContaining({ src: 'const x = 1', raw: '```ts\nconst x = 1', mode: 'code', language: 'ts' }),
     ])
   })
 
@@ -21,7 +22,7 @@ describe('splitMarkdownStream', () => {
     expect(first).toHaveLength(1)
     expect(next).toHaveLength(1)
     expect(first[0].key).toBe(next[0].key)
-    expect(next[0]).toEqual(expect.objectContaining({ mode: 'live', src: '```md\n# title\n\n- item' }))
+    expect(next[0]).toEqual(expect.objectContaining({ mode: 'code', language: 'md', src: '# title\n\n- item' }))
   })
 
   it('splits stable paragraphs from the live tail while streaming', () => {
@@ -52,7 +53,7 @@ describe('splitMarkdownStream', () => {
   it('does not split on blank lines inside fenced code blocks', () => {
     expect(splitMarkdownStream('before\n\n```ts\nconst a = 1\n\nconst b = 2\n```\n\nafter', true)).toEqual([
       expect.objectContaining({ src: 'before\n\n', mode: 'full' }),
-      expect.objectContaining({ src: '```ts\nconst a = 1\n\nconst b = 2\n```\n\n', mode: 'full' }),
+      expect.objectContaining({ src: 'const a = 1\n\nconst b = 2', raw: '```ts\nconst a = 1\n\nconst b = 2\n```\n\n', mode: 'code', complete: true }),
       expect.objectContaining({ src: 'after', mode: 'live' }),
     ])
   })
@@ -60,7 +61,7 @@ describe('splitMarkdownStream', () => {
   it('splits stable content from an unfinished trailing code fence while streaming', () => {
     expect(splitMarkdownStream('before\n\n```ts\nconst x = 1', true)).toEqual([
       expect.objectContaining({ src: 'before\n\n', mode: 'full' }),
-      expect.objectContaining({ src: '```ts\nconst x = 1', mode: 'live' }),
+      expect.objectContaining({ src: 'const x = 1', raw: '```ts\nconst x = 1', mode: 'code', complete: false }),
     ])
   })
 
@@ -72,19 +73,27 @@ describe('splitMarkdownStream', () => {
     expect(first[0].src).toBe(next[0].src)
     expect(first[1].key).toBe(next[1].key)
     expect(first[1].src).not.toBe(next[1].src)
-    expect(next[1].src).toBe('```ts\nconst x = 12')
+    expect(next[1].src).toBe('const x = 12')
   })
 
   it('splits stable content before a completed code fence while streaming', () => {
     expect(splitMarkdownStream('before\n\n```ts\nconst x = 1\n```', true)).toEqual([
       expect.objectContaining({ src: 'before\n\n', mode: 'full' }),
-      expect.objectContaining({ src: '```ts\nconst x = 1\n```', mode: 'live' }),
+      expect.objectContaining({ src: 'const x = 1', raw: '```ts\nconst x = 1\n```', mode: 'code', complete: true }),
     ])
   })
 
   it('keeps reference-style markdown as one live block', () => {
     expect(splitMarkdownStream('[docs][1]\n\n[1]: https://example.com', true)).toEqual([
       expect.objectContaining({ src: '[docs][1]\n\n[1]: https://example.com', mode: 'live' }),
+    ])
+  })
+
+  it('does not treat footnotes as reference definitions that disable block splitting', () => {
+    expect(splitMarkdownStream('text[^ref]\n\n[^ref]: footnote\n\n```ts\nconst x = 1\n```', false)).toEqual([
+      expect.objectContaining({ src: 'text[^ref]\n\n', mode: 'full' }),
+      expect.objectContaining({ src: '[^ref]: footnote\n\n', mode: 'full' }),
+      expect.objectContaining({ src: 'const x = 1', raw: '```ts\nconst x = 1\n```', mode: 'code', language: 'ts' }),
     ])
   })
 
@@ -102,7 +111,8 @@ describe('splitMarkdownStream', () => {
     expect(next.blocks).toHaveLength(2)
     expect(next.blocks[0]).toBe(first.blocks[0])
     expect(next.blocks[1].key).toBe(first.blocks[1].key)
-    expect(next.blocks[1].src).toBe('```ts\nconst x = 12')
+    expect(next.blocks[1].src).toBe('const x = 12')
+    expect(next.blocks[1].raw).toBe('```ts\nconst x = 12')
   })
 
   it('falls back to full splitting when appended text closes an open code fence', () => {
