@@ -4,3 +4,5 @@ export type HighlightToken = {
 }
 
 export type HighlightTokens = HighlightToken[][]
+
+export type { ShikiThemeInput } from './shikiTheme'

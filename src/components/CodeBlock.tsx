@@ -1,7 +1,6 @@
 import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
-import { useSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
-import { useWorkerSyntaxHighlight } from '../hooks/useWorkerSyntaxHighlight'
+import { useSyntaxHighlight, useStreamingSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
 import { themeStore } from '../store/themeStore'
 import { CopyButton } from './ui'
 import { useInView } from '../hooks/useInView'
@@ -154,7 +153,7 @@ export const CodeBlock = memo(function CodeBlock({
     delayMs: 0,
     mode: 'tokens',
   })
-  const { output: streamingTokens, highlightedCode: streamingHighlightedCode = code } = useWorkerSyntaxHighlight(
+  const { output: streamingTokens, highlightedCode: streamingHighlightedCode = code } = useStreamingSyntaxHighlight(
     code,
     {
       lang: effectiveLanguage,
