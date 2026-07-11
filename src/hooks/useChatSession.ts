@@ -45,6 +45,7 @@ import {
 import { getMessageText, isUserMessage, type AssistantMessageInfo, type Message as UIMessage } from '../types/message'
 import { clipboardErrorHandler, copyTextToClipboard, createErrorHandler } from '../utils'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
+import { shouldNotifySessionCompletion } from '../utils/sessionCompletionNotificationPolicy'
 import { serverStorage } from '../utils/perServerStorage'
 import { STORAGE_KEY_SELECTED_AGENT } from '../constants'
 import type { ChatAreaHandle } from '../features/chat'
@@ -393,16 +394,6 @@ export function useChatSession({
           return [...prev, request]
         })
 
-        // 页面不在前台时通知用户有权限请求等待批准
-        const permDesc = request.patterns?.length ? `${request.permission}: ${request.patterns[0]}` : request.permission
-        const title = buildNotificationTitle(request.sessionID, 'Permission Required')
-        if (notificationEventSettingsStore.isSystemEnabled('permission')) {
-          sendNotification(title, permDesc, {
-            sessionId: request.sessionID,
-            directory: effectiveDirectory,
-          })
-        }
-        // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
       onPermissionReplied: (data: { sessionID: string; requestID: string }) => {
         setPendingPermissionRequests(prev =>
@@ -438,7 +429,7 @@ export function useChatSession({
       onSessionIdle: (sessionID: string) => {
         // 页面不在前台时发送浏览器通知
         const title = buildNotificationTitle(sessionID, 'Session completed')
-        if (notificationEventSettingsStore.isSystemEnabled('completed')) {
+        if (shouldNotifySessionCompletion(sessionID) && notificationEventSettingsStore.isSystemEnabled('completed')) {
           sendNotification(title, 'Session completed', {
             sessionId: sessionID,
             directory: effectiveDirectory,

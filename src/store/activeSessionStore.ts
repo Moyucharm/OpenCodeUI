@@ -123,6 +123,10 @@ class ActiveSessionStore {
   getBusySessionsSnapshot = (): ActiveSessionEntry[] => this.cachedBusySessions
   getBusyCountSnapshot = (): number => this.cachedBusyCount
 
+  hasPendingRequest(requestId: string): boolean {
+    return this.pendingRequests.has(requestId)
+  }
+
   private applyStatusSnapshot(statusMap: SessionStatusMap, baseMap: SessionStatusMap): SessionStatusMap {
     const nextMap = { ...baseMap }
 

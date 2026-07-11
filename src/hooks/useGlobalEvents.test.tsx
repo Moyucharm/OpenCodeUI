@@ -1,5 +1,5 @@
-import { renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerSessionConsumer, useGlobalEvents } from './useGlobalEvents'
 
 function createDeferred<T>() {
@@ -20,6 +20,7 @@ const {
   getFocusedSessionIdMock,
   getSessionAndDescendantsMock,
   notificationPushMock,
+  playNotificationSoundMock,
   playNotificationSoundDedupedMock,
   getSoundSnapshotMock,
   isSystemEnabledMock,
@@ -31,51 +32,67 @@ const {
   autoApproveStoreMock,
   clearSessionRuntimeStateMock,
   clearPaneSessionMock,
-} = vi.hoisted(() => ({
-  subscribeToEventsMock: vi.fn(),
-  getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() => Promise.resolve({})),
-  getPendingPermissionsMock: vi.fn(() =>
-    Promise.resolve([] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>),
-  ),
-  getPendingQuestionsMock: vi.fn(() => Promise.resolve([])),
-  replyPermissionMock: vi.fn(() => Promise.resolve()),
-  childBelongsToSessionMock: vi.fn<(sessionId: string, rootSessionId: string) => boolean>(() => false),
-  getFocusedSessionIdMock: vi.fn<() => string | null>(() => null),
-  getSessionAndDescendantsMock: vi.fn((sessionId: string) => [sessionId]),
-  notificationPushMock: vi.fn(),
-  playNotificationSoundDedupedMock: vi.fn(),
-  isSystemEnabledMock: vi.fn((type: string) => type !== 'permission'),
-  applyServerConnectedTimestampMock: vi.fn(),
-  getActiveServerIdMock: vi.fn(() => 'local'),
-  checkHealthMock: vi.fn(() => Promise.resolve({ status: 'online' })),
-  onServerChangeMock: vi.fn((_listener: (serverId: string) => void) => vi.fn()),
-  clearSessionRuntimeStateMock: vi.fn(),
-  clearPaneSessionMock: vi.fn(),
-  getSoundSnapshotMock: vi.fn(() => ({
-    currentSessionEnabled: true,
-  })),
-  activeSessionStoreMock: {
-    initialize: vi.fn(),
-    initializePendingRequests: vi.fn(),
-    mergeStatusRefresh: vi.fn(),
-    mergePendingRequests: vi.fn(),
-    setSessionMetaBulk: vi.fn(),
-    setSessionMeta: vi.fn(),
-    getSessionMeta: vi.fn((sessionId?: string) => ({ title: sessionId || 'Child Session', directory: '/workspace' })),
-    addPendingRequest: vi.fn(),
-    resolvePendingRequest: vi.fn(),
-    updateStatus: vi.fn(),
-    getSnapshot: vi.fn(() => ({ statusMap: {} })),
-  },
-  autoApproveStoreMock: {
-    fullAutoMode: 'off' as 'off' | 'session' | 'global',
-    approvePendingOnFullAuto: false,
-    subscribe: vi.fn((_listener: () => void) => vi.fn()),
-    getPaneFullAutoMode: vi.fn((_paneId: string) => 'off' as 'off' | 'session' | 'global'),
-    claimAutoReply: vi.fn((_requestId: string) => true),
-    releaseAutoReply: vi.fn((_requestId: string) => undefined),
-  },
-}))
+  getChildSessionInfoMock,
+  isChildSessionCompletionEnabledMock,
+  sendSystemNotificationMock,
+  hasPendingRequestMock,
+  requestTaskbarAttentionMock,
+} = vi.hoisted(() => {
+  const hasPendingRequestMock = vi.fn<(requestId: string) => boolean>(() => true)
+
+  return {
+    subscribeToEventsMock: vi.fn(),
+    getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() => Promise.resolve({})),
+    getPendingPermissionsMock: vi.fn(() =>
+      Promise.resolve([] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>),
+    ),
+    getPendingQuestionsMock: vi.fn(() => Promise.resolve([])),
+    replyPermissionMock: vi.fn(() => Promise.resolve()),
+    childBelongsToSessionMock: vi.fn<(sessionId: string, rootSessionId: string) => boolean>(() => false),
+    getFocusedSessionIdMock: vi.fn<() => string | null>(() => null),
+    getSessionAndDescendantsMock: vi.fn((sessionId: string) => [sessionId]),
+    notificationPushMock: vi.fn(),
+    playNotificationSoundMock: vi.fn(),
+    playNotificationSoundDedupedMock: vi.fn(),
+    isSystemEnabledMock: vi.fn((type: string) => type !== 'permission'),
+    applyServerConnectedTimestampMock: vi.fn(),
+    getActiveServerIdMock: vi.fn(() => 'local'),
+    checkHealthMock: vi.fn(() => Promise.resolve({ status: 'online' })),
+    onServerChangeMock: vi.fn((_listener: (serverId: string) => void) => vi.fn()),
+    clearSessionRuntimeStateMock: vi.fn(),
+    clearPaneSessionMock: vi.fn(),
+    getChildSessionInfoMock: vi.fn(),
+    isChildSessionCompletionEnabledMock: vi.fn(() => false),
+    sendSystemNotificationMock: vi.fn(),
+    hasPendingRequestMock,
+    requestTaskbarAttentionMock: vi.fn(),
+    getSoundSnapshotMock: vi.fn(() => ({
+      currentSessionEnabled: true,
+    })),
+    activeSessionStoreMock: {
+      initialize: vi.fn(),
+      initializePendingRequests: vi.fn(),
+      mergeStatusRefresh: vi.fn(),
+      mergePendingRequests: vi.fn(),
+      setSessionMetaBulk: vi.fn(),
+      setSessionMeta: vi.fn(),
+      getSessionMeta: vi.fn((sessionId?: string) => ({ title: sessionId || 'Child Session', directory: '/workspace' })),
+      addPendingRequest: vi.fn(),
+      resolvePendingRequest: vi.fn(),
+      updateStatus: vi.fn(),
+      getSnapshot: vi.fn(() => ({ statusMap: {} })),
+      hasPendingRequest: hasPendingRequestMock,
+    },
+    autoApproveStoreMock: {
+      fullAutoMode: 'off' as 'off' | 'session' | 'global',
+      approvePendingOnFullAuto: false,
+      subscribe: vi.fn((_listener: () => void) => vi.fn()),
+      getPaneFullAutoMode: vi.fn((_paneId: string) => 'off' as 'off' | 'session' | 'global'),
+      claimAutoReply: vi.fn((_requestId: string) => true),
+      releaseAutoReply: vi.fn((_requestId: string) => undefined),
+    },
+  }
+})
 
 vi.mock('../api', () => ({
   subscribeToEvents: subscribeToEventsMock,
@@ -105,6 +122,7 @@ vi.mock('../store', () => ({
     markIdle: vi.fn(),
     markError: vi.fn(),
     registerChildSession: vi.fn(),
+    getSessionInfo: getChildSessionInfoMock,
   },
   paneLayoutStore: {
     getFocusedSessionId: getFocusedSessionIdMock,
@@ -122,6 +140,12 @@ vi.mock('../store/activeSessionStore', () => ({
   activeSessionStore: activeSessionStoreMock,
 }))
 
+vi.mock('../store/childSessionStore', () => ({
+  childSessionStore: {
+    getSessionInfo: getChildSessionInfoMock,
+  },
+}))
+
 vi.mock('../store/notificationStore', () => ({
   notificationStore: {
     push: notificationPushMock,
@@ -137,10 +161,12 @@ vi.mock('../store/soundStore', () => ({
 vi.mock('../store/notificationEventSettingsStore', () => ({
   notificationEventSettingsStore: {
     isSystemEnabled: (type: 'completed' | 'permission' | 'question' | 'error') => isSystemEnabledMock(type),
+    isChildSessionCompletionEnabled: () => isChildSessionCompletionEnabledMock(),
   },
 }))
 
 vi.mock('../utils/notificationSoundBridge', () => ({
+  playNotificationSound: playNotificationSoundMock,
   playNotificationSoundDeduped: playNotificationSoundDedupedMock,
 }))
 
@@ -150,6 +176,14 @@ vi.mock('../utils/sessionLifecycle', () => ({
 
 vi.mock('../store/autoApproveStore', () => ({
   autoApproveStore: autoApproveStoreMock,
+}))
+
+vi.mock('./useNotification', () => ({
+  sendSystemNotification: (...args: unknown[]) => sendSystemNotificationMock(...args),
+}))
+
+vi.mock('../utils/taskbarAttention', () => ({
+  requestTaskbarAttention: (...args: unknown[]) => requestTaskbarAttentionMock(...args),
 }))
 
 describe('useGlobalEvents', () => {
@@ -163,6 +197,7 @@ describe('useGlobalEvents', () => {
     getFocusedSessionIdMock.mockReset()
     getSessionAndDescendantsMock.mockReset()
     notificationPushMock.mockReset()
+    playNotificationSoundMock.mockReset()
     playNotificationSoundDedupedMock.mockReset()
     getSoundSnapshotMock.mockReset()
     isSystemEnabledMock.mockReset()
@@ -172,6 +207,11 @@ describe('useGlobalEvents', () => {
     onServerChangeMock.mockReset()
     clearSessionRuntimeStateMock.mockReset()
     clearPaneSessionMock.mockReset()
+    getChildSessionInfoMock.mockReset()
+    isChildSessionCompletionEnabledMock.mockReset()
+    sendSystemNotificationMock.mockReset()
+    hasPendingRequestMock.mockReset()
+    requestTaskbarAttentionMock.mockReset()
     autoApproveStoreMock.fullAutoMode = 'off'
     autoApproveStoreMock.approvePendingOnFullAuto = false
     autoApproveStoreMock.subscribe.mockReset()
@@ -196,6 +236,13 @@ describe('useGlobalEvents', () => {
     autoApproveStoreMock.claimAutoReply.mockReturnValue(true)
     activeSessionStoreMock.getSessionMeta.mockReturnValue({ title: 'Child Session', directory: '/workspace' })
     activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: {} })
+    getChildSessionInfoMock.mockReturnValue(undefined)
+    isChildSessionCompletionEnabledMock.mockReturnValue(false)
+    hasPendingRequestMock.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('stores server clock calibration when server.connected arrives', async () => {
@@ -351,6 +398,128 @@ describe('useGlobalEvents', () => {
       'permission',
       'edit: src/app.tsx',
     )
+  })
+
+  it('does not replay or notify a late permission resolved locally before initialization completes', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const statusDeferred = createDeferred<Record<string, { type: string }>>()
+    const fetchComplete = createDeferred<void>()
+    const pendingRequestIds = new Set<string>()
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionStatusMock.mockImplementation(() => statusDeferred.promise)
+    getPendingPermissionsMock.mockResolvedValue([])
+    getPendingQuestionsMock.mockResolvedValue([])
+    isSystemEnabledMock.mockReturnValue(true)
+    activeSessionStoreMock.addPendingRequest.mockImplementation((requestId: string) => {
+      pendingRequestIds.add(requestId)
+    })
+    activeSessionStoreMock.resolvePendingRequest.mockImplementation((requestId: string) => {
+      pendingRequestIds.delete(requestId)
+    })
+    hasPendingRequestMock.mockImplementation(requestId => pendingRequestIds.has(requestId))
+    activeSessionStoreMock.setSessionMetaBulk.mockImplementation(() => fetchComplete.resolve())
+
+    try {
+      renderHook(() => useGlobalEvents(['/workspace']))
+
+      await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/workspace'))
+      await waitFor(() => expect(callbacks).toBeDefined())
+      vi.useFakeTimers()
+
+      callbacks!.onPermissionAsked?.({
+        id: 'permission-local-reply',
+        sessionID: 'background-session',
+        permission: 'bash',
+        patterns: [],
+      } as never)
+      activeSessionStoreMock.resolvePendingRequest('permission-local-reply')
+      statusDeferred.resolve({})
+
+      await fetchComplete.promise
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(activeSessionStoreMock.addPendingRequest).toHaveBeenCalledTimes(1)
+      expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+      expect(notificationPushMock).not.toHaveBeenCalled()
+    } finally {
+      activeSessionStoreMock.addPendingRequest.mockReset()
+      activeSessionStoreMock.resolvePendingRequest.mockReset()
+      activeSessionStoreMock.setSessionMetaBulk.mockReset()
+    }
+  })
+
+  it('does not replay late pending requests after an active server change', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    let onServerChange: ((serverId: string) => void) | undefined
+    const statusDeferred = createDeferred<Record<string, { type: string }>>()
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    onServerChangeMock.mockImplementation(listener => {
+      onServerChange = listener
+      return vi.fn()
+    })
+    getSessionStatusMock.mockImplementation(() => statusDeferred.promise)
+    getPendingPermissionsMock.mockResolvedValue([])
+    getPendingQuestionsMock.mockResolvedValue([])
+
+    renderHook(() => useGlobalEvents(['/workspace']))
+
+    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/workspace'))
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-server-change',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    onServerChange?.('remote')
+    statusDeferred.resolve({})
+
+    await waitFor(() => expect(activeSessionStoreMock.initializePendingRequests).toHaveBeenCalled())
+
+    expect(activeSessionStoreMock.addPendingRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not replay late pending descendant requests after session deletion', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const statusDeferred = createDeferred<Record<string, { type: string }>>()
+
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionAndDescendantsMock.mockReturnValue(['parent-session', 'child-session'])
+    getSessionStatusMock.mockImplementation(() => statusDeferred.promise)
+    getPendingPermissionsMock.mockResolvedValue([])
+    getPendingQuestionsMock.mockResolvedValue([])
+
+    renderHook(() => useGlobalEvents(['/workspace']))
+
+    await waitFor(() => expect(getSessionStatusMock).toHaveBeenCalledWith('/workspace'))
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-deleted-child',
+      sessionID: 'child-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    callbacks!.onSessionDeleted?.('parent-session')
+    statusDeferred.resolve({})
+
+    await waitFor(() => expect(activeSessionStoreMock.initializePendingRequests).toHaveBeenCalled())
+
+    expect(activeSessionStoreMock.addPendingRequest).toHaveBeenCalledTimes(1)
   })
 
   it('keeps replaying pending requests across overlapping initialization fetches', async () => {
@@ -588,6 +757,7 @@ describe('useGlobalEvents', () => {
     renderHook(() => useGlobalEvents())
 
     await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
 
     callbacks!.onPermissionAsked?.({
       id: 'perm-2',
@@ -595,9 +765,12 @@ describe('useGlobalEvents', () => {
       permission: 'bash',
       patterns: [],
     })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
-    expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
+    expect(playNotificationSoundMock).toHaveBeenCalledWith('permission')
   })
 
   it('still plays current-session sound when the matching system notification toggle is disabled', async () => {
@@ -612,6 +785,7 @@ describe('useGlobalEvents', () => {
     renderHook(() => useGlobalEvents())
 
     await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
 
     callbacks!.onPermissionAsked?.({
       id: 'perm-sound',
@@ -619,9 +793,12 @@ describe('useGlobalEvents', () => {
       permission: 'bash',
       patterns: [],
     })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
-    expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
+    expect(playNotificationSoundMock).toHaveBeenCalledWith('permission')
   })
 
   it('does not play permission sound for a session full-auto pane', async () => {
@@ -631,12 +808,14 @@ describe('useGlobalEvents', () => {
       return vi.fn()
     })
     getFocusedSessionIdMock.mockReturnValue('child-session')
+    isSystemEnabledMock.mockReturnValue(true)
     autoApproveStoreMock.getPaneFullAutoMode.mockImplementation(paneId => (paneId === 'test-pane' ? 'session' : 'off'))
     const unregister = registerSessionConsumer('test-pane', 'child-session', {})
 
     renderHook(() => useGlobalEvents())
 
     await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
 
     callbacks!.onPermissionAsked?.({
       id: 'perm-session-auto',
@@ -644,11 +823,49 @@ describe('useGlobalEvents', () => {
       permission: 'bash',
       patterns: [],
     })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
-    expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    expect(playNotificationSoundMock).not.toHaveBeenCalled()
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
 
     unregister()
+  })
+
+  it('drops a queued permission notification when session full auto is enabled before flush', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    autoApproveStoreMock.getPaneFullAutoMode.mockReturnValue('off')
+    const unregister = registerSessionConsumer('test-pane', 'child-session', {})
+
+    try {
+      renderHook(() => useGlobalEvents())
+
+      await waitFor(() => expect(callbacks).toBeDefined())
+      vi.useFakeTimers()
+      callbacks!.onPermissionAsked?.({
+        id: 'perm-session-auto-late',
+        sessionID: 'child-session',
+        permission: 'bash',
+        patterns: [],
+      })
+      autoApproveStoreMock.getPaneFullAutoMode.mockReturnValue('session')
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+      expect(notificationPushMock).not.toHaveBeenCalled()
+      expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
+    } finally {
+      unregister()
+    }
   })
 
   it('does not play permission sound for a child session of a session full-auto pane', async () => {
@@ -661,12 +878,14 @@ describe('useGlobalEvents', () => {
       return sessionId === 'child-session' && rootSessionId === 'parent-session'
     })
     getFocusedSessionIdMock.mockReturnValue('child-session')
+    isSystemEnabledMock.mockReturnValue(true)
     autoApproveStoreMock.getPaneFullAutoMode.mockImplementation(paneId => (paneId === 'test-pane' ? 'session' : 'off'))
     const unregister = registerSessionConsumer('test-pane', 'parent-session', {})
 
     renderHook(() => useGlobalEvents())
 
     await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
 
     callbacks!.onPermissionAsked?.({
       id: 'perm-child-session-auto',
@@ -674,9 +893,13 @@ describe('useGlobalEvents', () => {
       permission: 'bash',
       patterns: [],
     })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
-    expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    expect(playNotificationSoundMock).not.toHaveBeenCalled()
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
 
     unregister()
   })
@@ -694,20 +917,421 @@ describe('useGlobalEvents', () => {
 
     renderHook(() => useGlobalEvents())
 
-    await waitFor(() => expect(callbacks).toBeDefined())
+      await waitFor(() => expect(callbacks).toBeDefined())
+      vi.useFakeTimers()
 
-    callbacks!.onPermissionAsked?.({
-      id: 'perm-other-pane',
-      sessionID: 'other-session',
-      permission: 'bash',
-      patterns: [],
-    })
+      callbacks!.onPermissionAsked?.({
+        id: 'perm-other-pane',
+        sessionID: 'other-session',
+        permission: 'bash',
+        patterns: [],
+      })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
-    expect(playNotificationSoundDedupedMock).toHaveBeenCalledWith('permission')
+    expect(playNotificationSoundMock).toHaveBeenCalledWith('permission')
 
     unregisterAutoPane()
     unregisterOtherPane()
+  })
+
+  it('suppresses known child completion toast and sound while child completion reminders are disabled', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'child-session': { type: 'busy' } } })
+    getChildSessionInfoMock.mockReturnValue({ id: 'child-session' })
+    isChildSessionCompletionEnabledMock.mockReturnValue(false)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionStatus?.({ sessionID: 'child-session', status: { type: 'idle' } } as never)
+
+    expect(notificationPushMock).not.toHaveBeenCalled()
+    expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps unknown completion reminders fail-open while child completion reminders are disabled', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'unknown-session': { type: 'busy' } } })
+    getChildSessionInfoMock.mockReturnValue(undefined)
+    isChildSessionCompletionEnabledMock.mockReturnValue(false)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+
+    callbacks!.onSessionStatus?.({ sessionID: 'unknown-session', status: { type: 'idle' } } as never)
+
+    expect(notificationPushMock).toHaveBeenCalledTimes(1)
+    expect(requestTaskbarAttentionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('requests taskbar attention when session.idle arrives without a status transition', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+
+    expect(requestTaskbarAttentionMock).toHaveBeenCalledWith('completed:main-session')
+  })
+
+  it('continues to dispatch known child permission and question requests', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const permissionAsked = vi.fn()
+    const questionAsked = vi.fn()
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    childBelongsToSessionMock.mockImplementation(
+      (sessionId, rootSessionId) => sessionId === 'child-session' && rootSessionId === 'parent-session',
+    )
+    getChildSessionInfoMock.mockReturnValue({ id: 'child-session' })
+    const unregister = registerSessionConsumer('child-pane', 'parent-session', {
+      onPermissionAsked: permissionAsked,
+      onQuestionAsked: questionAsked,
+    })
+
+    try {
+      renderHook(() => useGlobalEvents())
+
+      await waitFor(() => expect(callbacks).toBeDefined())
+
+      callbacks!.onPermissionAsked?.({
+        id: 'permission-child',
+        sessionID: 'child-session',
+        permission: 'bash',
+        patterns: [],
+      } as never)
+      callbacks!.onQuestionAsked?.({
+        id: 'question-child',
+        sessionID: 'child-session',
+        questions: [{ header: 'Need input' }],
+      } as never)
+
+      expect(permissionAsked).toHaveBeenCalledTimes(1)
+      expect(questionAsked).toHaveBeenCalledTimes(1)
+      expect(requestTaskbarAttentionMock).toHaveBeenCalledTimes(1)
+    } finally {
+      unregister()
+    }
+  })
+
+  it('merges consecutive permission notifications for one session', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-1',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: ['first'],
+    } as never)
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-2',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: ['second'],
+    } as never)
+
+    expect(notificationPushMock).not.toHaveBeenCalled()
+
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).toHaveBeenCalledTimes(1)
+    expect(notificationPushMock).toHaveBeenCalledTimes(1)
+    expect(requestTaskbarAttentionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('flushes permission notification groups from different sessions independently', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-a',
+      sessionID: 'background-a',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-b',
+      sessionID: 'background-b',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).toHaveBeenCalledTimes(2)
+    expect(notificationPushMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('plays one permission sound for each directly open session batch', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    const unregisterFirst = registerSessionConsumer('first-pane', 'direct-session-a', {})
+    const unregisterSecond = registerSessionConsumer('second-pane', 'direct-session-b', {})
+
+    try {
+      renderHook(() => useGlobalEvents())
+
+      await waitFor(() => expect(callbacks).toBeDefined())
+      vi.useFakeTimers()
+
+      callbacks!.onPermissionAsked?.({
+        id: 'permission-a',
+        sessionID: 'direct-session-a',
+        permission: 'bash',
+        patterns: [],
+      } as never)
+      callbacks!.onPermissionAsked?.({
+        id: 'permission-b',
+        sessionID: 'direct-session-b',
+        permission: 'bash',
+        patterns: [],
+      } as never)
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(playNotificationSoundMock).toHaveBeenCalledTimes(2)
+      expect(playNotificationSoundMock).toHaveBeenCalledWith('permission')
+      expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    } finally {
+      unregisterFirst()
+      unregisterSecond()
+    }
+  })
+
+  it('drops queued permission notifications when every request is replied before flush', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-resolved',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    callbacks!.onPermissionReplied?.({ sessionID: 'background-session', requestID: 'permission-resolved' })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+  })
+
+  it('drops queued permission notifications that are no longer active at flush', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-stale',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    hasPendingRequestMock.mockReturnValue(false)
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels queued permission notifications when a session is deleted', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-deleted',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    callbacks!.onSessionDeleted?.('background-session')
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+  })
+
+  it('clears queued permission notifications when the active server changes', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    let onServerChange: ((serverId: string) => void) | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    onServerChangeMock.mockImplementation(listener => {
+      onServerChange = listener
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-server-change',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    onServerChange?.('remote')
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+  })
+
+  it('disposes queued permission notifications when the global event effect unmounts', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    const { unmount } = renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
+
+    callbacks!.onPermissionAsked?.({
+      id: 'permission-unmount',
+      sessionID: 'background-session',
+      permission: 'bash',
+      patterns: [],
+    } as never)
+    unmount()
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(sendSystemNotificationMock).not.toHaveBeenCalled()
+    expect(notificationPushMock).not.toHaveBeenCalled()
+  })
+
+  it('dispatches permission UI to every matching pane while sending one system notification', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const firstPane = vi.fn()
+    const secondPane = vi.fn()
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    const unregisterFirst = registerSessionConsumer('first-pane', 'shared-session', { onPermissionAsked: firstPane })
+    const unregisterSecond = registerSessionConsumer('second-pane', 'shared-session', { onPermissionAsked: secondPane })
+
+    try {
+      renderHook(() => useGlobalEvents())
+
+      await waitFor(() => expect(callbacks).toBeDefined())
+      vi.useFakeTimers()
+
+      callbacks!.onPermissionAsked?.({
+        id: 'permission-shared',
+        sessionID: 'shared-session',
+        permission: 'bash',
+        patterns: [],
+      } as never)
+
+      expect(firstPane).toHaveBeenCalledTimes(1)
+      expect(secondPane).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+
+      expect(sendSystemNotificationMock).toHaveBeenCalledTimes(1)
+      expect(playNotificationSoundMock).toHaveBeenCalledTimes(1)
+    } finally {
+      unregisterFirst()
+      unregisterSecond()
+    }
   })
 
   it.each([
@@ -753,7 +1377,13 @@ describe('useGlobalEvents', () => {
 
       await waitFor(() => expect(callbacks).toBeDefined())
 
+      if (trigger === 'onPermissionAsked') vi.useFakeTimers()
       callbacks![trigger as keyof typeof callbacks]?.(payload as never)
+      if (trigger === 'onPermissionAsked') {
+        act(() => {
+          vi.advanceTimersByTime(500)
+        })
+      }
 
       expect(notificationPushMock).toHaveBeenCalledTimes(1)
       expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()

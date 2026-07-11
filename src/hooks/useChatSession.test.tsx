@@ -22,6 +22,10 @@ const {
   pendingPermissionRequestsMock,
   handlePermissionReplyMock,
   refreshPendingRequestsMock,
+  setPendingPermissionRequestsMock,
+  setPendingQuestionRequestsMock,
+  getChildSessionInfoMock,
+  isChildSessionCompletionEnabledMock,
 } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   summarizeSessionMock: vi.fn(),
@@ -44,6 +48,10 @@ const {
     (_requestId: string, _reply: string, _directory?: string, _sessionId?: string) => Promise.resolve(true),
   ),
   refreshPendingRequestsMock: vi.fn((_sessionIds?: string | string[], _directory?: string) => Promise.resolve()),
+  setPendingPermissionRequestsMock: vi.fn(),
+  setPendingQuestionRequestsMock: vi.fn(),
+  getChildSessionInfoMock: vi.fn(),
+  isChildSessionCompletionEnabledMock: vi.fn(() => false),
 }))
 
 const autoApproveState = vi.hoisted(() => ({
@@ -80,6 +88,7 @@ vi.mock('../store', () => ({
     getChildSessionIds: vi.fn(() => []),
     registerChildSession: vi.fn(),
     getSessionAndDescendants: vi.fn(() => []),
+    getSessionInfo: getChildSessionInfoMock,
   },
   useActiveSessionStore: () => ({ statusMap: {} }),
 }))
@@ -100,8 +109,8 @@ vi.mock('../hooks', () => ({
   usePermissionHandler: () => ({
     pendingPermissionRequests: pendingPermissionRequestsMock,
     pendingQuestionRequests: [],
-    setPendingPermissionRequests: vi.fn(),
-    setPendingQuestionRequests: vi.fn(),
+    setPendingPermissionRequests: setPendingPermissionRequestsMock,
+    setPendingQuestionRequests: setPendingQuestionRequestsMock,
     handlePermissionReply: handlePermissionReplyMock,
     handleQuestionReply: vi.fn(),
     handleQuestionReject: vi.fn(),
@@ -129,6 +138,13 @@ vi.mock('./useNotification', () => ({
 vi.mock('../store/notificationEventSettingsStore', () => ({
   notificationEventSettingsStore: {
     isSystemEnabled: (type: string) => isSystemEnabledMock(type),
+    isChildSessionCompletionEnabled: () => isChildSessionCompletionEnabledMock(),
+  },
+}))
+
+vi.mock('../store/childSessionStore', () => ({
+  childSessionStore: {
+    getSessionInfo: getChildSessionInfoMock,
   },
 }))
 
@@ -182,6 +198,10 @@ describe('useChatSession handleCommand', () => {
     useSessionFamilyMock.mockReset()
     handlePermissionReplyMock.mockReset()
     refreshPendingRequestsMock.mockReset()
+    setPendingPermissionRequestsMock.mockReset()
+    setPendingQuestionRequestsMock.mockReset()
+    getChildSessionInfoMock.mockReset()
+    isChildSessionCompletionEnabledMock.mockReset()
     pendingPermissionRequestsMock.length = 0
 
     registerSessionConsumerMock.mockReturnValue(vi.fn())
@@ -196,6 +216,8 @@ describe('useChatSession handleCommand', () => {
     autoApproveState.approvePendingOnFullAuto = false
     getSelectableAgentsMock.mockResolvedValue([{ name: 'build', mode: 'primary', hidden: false }])
     isSystemEnabledMock.mockImplementation((type: string) => type !== 'permission')
+    getChildSessionInfoMock.mockReturnValue(undefined)
+    isChildSessionCompletionEnabledMock.mockReturnValue(false)
 
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => window.setTimeout(() => cb(0), 16))
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => {
@@ -379,4 +401,66 @@ describe('useChatSession handleCommand', () => {
       expect(sendNotificationMock).not.toHaveBeenCalled()
     },
   )
+
+  it('sets pending permission UI immediately without a pane-level system notification', async () => {
+    let callbacks: Record<string, ((payload: unknown) => void) | undefined> | undefined
+    registerSessionConsumerMock.mockImplementation((_paneId, _sessionId, consumerCallbacks) => {
+      callbacks = consumerCallbacks as typeof callbacks
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+
+    renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      callbacks?.onPermissionAsked?.({
+        id: 'permission-1',
+        sessionID: 'session-1',
+        permission: 'bash',
+        patterns: [],
+      })
+    })
+
+    expect(setPendingPermissionRequestsMock).toHaveBeenCalledTimes(1)
+    expect(sendNotificationMock).not.toHaveBeenCalled()
+  })
+
+  it('suppresses completed system notifications for a known child when disabled', async () => {
+    let callbacks: Record<string, ((payload: unknown) => void) | undefined> | undefined
+    registerSessionConsumerMock.mockImplementation((_paneId, _sessionId, consumerCallbacks) => {
+      callbacks = consumerCallbacks as typeof callbacks
+      return vi.fn()
+    })
+    isSystemEnabledMock.mockReturnValue(true)
+    getChildSessionInfoMock.mockReturnValue({ id: 'child-session' })
+    isChildSessionCompletionEnabledMock.mockReturnValue(false)
+
+    renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'parent-session',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      callbacks?.onSessionIdle?.('child-session')
+    })
+
+    expect(sendNotificationMock).not.toHaveBeenCalled()
+  })
 })

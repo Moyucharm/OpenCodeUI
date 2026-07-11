@@ -12,12 +12,20 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { messageStore, childSessionStore, paneLayoutStore, serverStore } from '../store'
 import { activeSessionStore } from '../store/activeSessionStore'
 import { notificationStore } from '../store/notificationStore'
+import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
 import { soundStore } from '../store/soundStore'
-import { playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
+import { playNotificationSound, playNotificationSoundDeduped } from '../utils/notificationSoundBridge'
+import {
+  PermissionNotificationAggregator,
+  type PermissionNotificationNotice,
+} from '../utils/permissionNotificationAggregator'
+import { shouldNotifySessionCompletion } from '../utils/sessionCompletionNotificationPolicy'
+import { requestTaskbarAttention } from '../utils/taskbarAttention'
 import { clearSessionRuntimeState } from '../utils/sessionLifecycle'
 import { subscribeToEvents, getSessionStatus, getPendingPermissions, getPendingQuestions } from '../api'
 import { replyPermission } from '../api/permission'
 import { autoApproveStore } from '../store/autoApproveStore'
+import { sendSystemNotification } from './useNotification'
 import type { ApiMessage, ApiPart, ApiPermissionRequest, ApiQuestionRequest } from '../api/types'
 import type { SessionStatusMap } from '../types/api/session'
 
@@ -96,18 +104,20 @@ function hasConsumerForSession(sessionId: string): boolean {
   return false
 }
 
-function shouldPlayPermissionSound(sessionId: string): boolean {
-  if (autoApproveStore.fullAutoMode === 'global') return false
-
+function hasSessionFullAutoConsumer(sessionId: string): boolean {
   for (const [consumerId, consumer] of sessionConsumers.entries()) {
     if (!consumer.sessionId) continue
     if (autoApproveStore.getPaneFullAutoMode(consumerId) !== 'session') continue
     if (consumer.sessionId === sessionId || childSessionStore.belongsToSession(sessionId, consumer.sessionId)) {
-      return false
+      return true
     }
   }
 
-  return true
+  return false
+}
+
+function shouldPlayPermissionSound(sessionId: string): boolean {
+  return autoApproveStore.fullAutoMode !== 'global' && !hasSessionFullAutoConsumer(sessionId)
 }
 
 /** 检查是否有“其他”消费者仍在使用该 sessionId（排除当前 pane 自己） */
@@ -128,6 +138,12 @@ export function hasOtherConsumerForSession(sessionId: string, consumerId: string
 interface PendingRequest<T> {
   request: T
   timestamp: number
+}
+
+interface QueuedPermissionNotification extends PermissionNotificationNotice {
+  title: string
+  body: string
+  directory?: string
 }
 
 const pendingPermissions = new Map<string, PendingRequest<ApiPermissionRequest>[]>()
@@ -287,6 +303,34 @@ export function useGlobalEvents(directories?: string[]) {
     let fetchVersion = 0
     let activeFetchVersion = 0
     let disposed = false
+    const permissionNotificationAggregator = new PermissionNotificationAggregator<QueuedPermissionNotification>(
+      (sessionId, notices) => {
+        if (autoApproveStore.fullAutoMode === 'global' || hasSessionFullAutoConsumer(sessionId)) return
+
+        const pendingNotices = notices.filter(notice => activeSessionStore.hasPendingRequest(notice.requestId))
+        if (pendingNotices.length === 0) return
+
+        const firstNotice = pendingNotices[0]
+        if (notificationEventSettingsStore.isSystemEnabled('permission')) {
+          void sendSystemNotification(firstNotice.title, firstNotice.body, {
+            sessionId,
+            directory: firstNotice.directory,
+          })
+        }
+
+        if (!belongsToCurrentSession(sessionId)) {
+          notificationStore.push('permission', firstNotice.title, firstNotice.body, sessionId, firstNotice.directory)
+        } else if (
+          shouldPlayPermissionSound(sessionId) &&
+          isSessionDirectlyOpen(sessionId) &&
+          soundStore.getSnapshot().currentSessionEnabled
+        ) {
+          playNotificationSound('permission')
+        }
+
+        void requestTaskbarAttention(`permission:${sessionId}`)
+      },
+    )
     const latePendingRequests = new Map<
       string,
       {
@@ -324,6 +368,11 @@ export function useGlobalEvents(directories?: string[]) {
       void fetchActiveScopeData(directoriesRef.current)
         .then(({ statusMap, permissions, questions, sessionMetaEntries }) => {
           if (disposed || currentVersion !== fetchVersion) return
+          const activeLateRequestIds = new Set(
+            Array.from(latePendingRequests.values())
+              .filter(pending => activeSessionStore.hasPendingRequest(pending.requestId))
+              .map(pending => pending.requestId),
+          )
           if (strategy === 'merge') {
             activeSessionStore.mergeStatusRefresh(statusMap)
             activeSessionStore.mergePendingRequests(permissions, questions)
@@ -333,7 +382,11 @@ export function useGlobalEvents(directories?: string[]) {
           }
           const currentDirectories = directoriesRef.current
           const currentScopeKey = getScopeKey(directoriesRef.current)
-          for (const pending of latePendingRequests.values()) {
+          for (const [requestId, pending] of latePendingRequests) {
+            if (!activeLateRequestIds.has(requestId)) {
+              latePendingRequests.delete(requestId)
+              continue
+            }
             const matchesScope = pending.directory
               ? !currentDirectories || currentDirectories.length === 0 || currentDirectories.includes(pending.directory)
               : pending.scopeKey === currentScopeKey
@@ -360,6 +413,7 @@ export function useGlobalEvents(directories?: string[]) {
     const markPermissionReplied = (sessionID: string, requestID: string) => {
       removePendingByRequestId(pendingPermissions, sessionID, requestID)
       latePendingRequests.delete(requestID)
+      permissionNotificationAggregator.resolve(sessionID, requestID)
       activeSessionStore.resolvePendingRequest(requestID)
 
       // Broadcast to ALL consumers regardless of session match.
@@ -403,6 +457,8 @@ export function useGlobalEvents(directories?: string[]) {
 
     const unsubscribeAutoApprove = autoApproveStore.subscribe(approveGlobalPendingPermissions)
     const unsubscribeServerChange = serverStore.onServerChange(serverId => {
+      permissionNotificationAggregator.clear()
+      latePendingRequests.clear()
       void serverStore.checkHealth(serverId).catch(() => {})
     })
 
@@ -462,6 +518,9 @@ export function useGlobalEvents(directories?: string[]) {
       onSessionIdle: data => {
         messageStore.handleSessionIdle(data.sessionID)
         childSessionStore.markIdle(data.sessionID)
+        if (shouldNotifySessionCompletion(data.sessionID)) {
+          void requestTaskbarAttention(`completed:${data.sessionID}`)
+        }
         dispatchToConsumers(data.sessionID, cb => cb.onSessionIdle?.(data.sessionID))
       },
 
@@ -505,6 +564,11 @@ export function useGlobalEvents(directories?: string[]) {
 
       onSessionDeleted: sessionId => {
         const removedSessionIds = childSessionStore.getSessionAndDescendants(sessionId)
+        const removedSessionIdSet = new Set(removedSessionIds)
+        for (const id of removedSessionIds) permissionNotificationAggregator.cancelSession(id)
+        for (const [requestId, pending] of latePendingRequests) {
+          if (removedSessionIdSet.has(pending.sessionId)) latePendingRequests.delete(requestId)
+        }
         clearSessionRuntimeState(sessionId)
         for (const id of removedSessionIds) paneLayoutStore.clearSession(id)
       },
@@ -552,22 +616,20 @@ export function useGlobalEvents(directories?: string[]) {
           })
         }
 
-        // Toast 通知 — 不属于当前 session family 的才弹
-        if (!belongsToCurrentSession(request.sessionID)) {
-          notificationStore.push('permission', `${sessionLabel} — Permission`, desc, request.sessionID, meta?.directory)
-        } else if (
-          shouldPlayPermissionSound(request.sessionID) &&
-          isSessionDirectlyOpen(request.sessionID) &&
-          soundStore.getSnapshot().currentSessionEnabled
-        ) {
-          // 当前会话：如果开启了当前会话提示音
-          playNotificationSoundDeduped('permission')
-        }
-
         if (belongsToCurrentSession(request.sessionID)) {
           dispatchToConsumers(request.sessionID, cb => cb.onPermissionAsked?.(request))
         } else {
           addPending(pendingPermissions, request.sessionID, request)
+        }
+
+        if (!hasSessionFullAutoConsumer(request.sessionID)) {
+          permissionNotificationAggregator.enqueue({
+            sessionId: request.sessionID,
+            requestId: request.id,
+            title: `${sessionLabel} — Permission`,
+            body: desc,
+            directory: meta?.directory,
+          })
         }
       },
 
@@ -603,6 +665,8 @@ export function useGlobalEvents(directories?: string[]) {
         } else if (isSessionDirectlyOpen(request.sessionID) && soundStore.getSnapshot().currentSessionEnabled) {
           playNotificationSoundDeduped('question')
         }
+
+        void requestTaskbarAttention(`question:${request.sessionID}`)
 
         if (belongsToCurrentSession(request.sessionID)) {
           dispatchToConsumers(request.sessionID, cb => cb.onQuestionAsked?.(request))
@@ -642,17 +706,22 @@ export function useGlobalEvents(directories?: string[]) {
         activeSessionStore.updateStatus(data.sessionID, data.status)
 
         // Toast — session 从 busy/retry 变成 idle 时弹 completed 通知
-        if (wasBusy && data.status.type === 'idle' && !belongsToCurrentSession(data.sessionID)) {
+        if (wasBusy && data.status.type === 'idle' && shouldNotifySessionCompletion(data.sessionID) && !belongsToCurrentSession(data.sessionID)) {
           const meta = activeSessionStore.getSessionMeta(data.sessionID)
           const sessionLabel = meta?.title || data.sessionID.slice(0, 8)
           notificationStore.push('completed', sessionLabel, 'Session completed', data.sessionID, meta?.directory)
         } else if (
           wasBusy &&
           data.status.type === 'idle' &&
+          shouldNotifySessionCompletion(data.sessionID) &&
           isSessionDirectlyOpen(data.sessionID) &&
           soundStore.getSnapshot().currentSessionEnabled
         ) {
           playNotificationSoundDeduped('completed')
+        }
+
+        if (wasBusy && data.status.type === 'idle' && shouldNotifySessionCompletion(data.sessionID)) {
+          void requestTaskbarAttention(`completed:${data.sessionID}`)
         }
       },
 
@@ -686,6 +755,7 @@ export function useGlobalEvents(directories?: string[]) {
       unsubscribeAutoApprove()
       unsubscribeServerChange()
       unsubscribe()
+      permissionNotificationAggregator.dispose()
     }
   }, [])
 

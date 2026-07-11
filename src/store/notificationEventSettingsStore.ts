@@ -6,10 +6,14 @@ export interface NotificationEventConfig {
 }
 
 export interface NotificationEventSettings {
+  childSessionCompletionEnabled: boolean
+  taskbarAttentionEnabled: boolean
   events: Record<NotificationType, NotificationEventConfig>
 }
 
 export interface NotificationEventSettingsBackup {
+  childSessionCompletionEnabled: boolean
+  taskbarAttentionEnabled: boolean
   events: Record<NotificationType, NotificationEventConfig>
 }
 
@@ -19,6 +23,8 @@ const STORAGE_KEY = 'opencode:notification-event-settings'
 
 function createDefaultSettings(): NotificationEventSettings {
   return {
+    childSessionCompletionEnabled: false,
+    taskbarAttentionEnabled: false,
     events: {
       completed: { systemEnabled: true },
       permission: { systemEnabled: true },
@@ -37,6 +43,14 @@ function loadSettings(): NotificationEventSettings {
 
     const parsed = JSON.parse(raw)
     return {
+      childSessionCompletionEnabled:
+        typeof parsed?.childSessionCompletionEnabled === 'boolean'
+          ? parsed.childSessionCompletionEnabled
+          : defaults.childSessionCompletionEnabled,
+      taskbarAttentionEnabled:
+        typeof parsed?.taskbarAttentionEnabled === 'boolean'
+          ? parsed.taskbarAttentionEnabled
+          : defaults.taskbarAttentionEnabled,
       events: {
         completed: {
           systemEnabled:
@@ -82,6 +96,14 @@ function normalizeSettings(raw: unknown): NotificationEventSettings {
   const parsed = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
 
   return {
+    childSessionCompletionEnabled:
+      typeof parsed?.childSessionCompletionEnabled === 'boolean'
+        ? parsed.childSessionCompletionEnabled
+        : defaults.childSessionCompletionEnabled,
+    taskbarAttentionEnabled:
+      typeof parsed?.taskbarAttentionEnabled === 'boolean'
+        ? parsed.taskbarAttentionEnabled
+        : defaults.taskbarAttentionEnabled,
     events: {
       completed: {
         systemEnabled:
@@ -153,6 +175,14 @@ class NotificationEventSettingsStore {
     return this.state.events[type]?.systemEnabled !== false
   }
 
+  isChildSessionCompletionEnabled(): boolean {
+    return this.state.childSessionCompletionEnabled
+  }
+
+  isTaskbarAttentionEnabled(): boolean {
+    return this.state.taskbarAttentionEnabled
+  }
+
   setSystemEnabled(type: NotificationType, systemEnabled: boolean) {
     this.state = {
       ...this.state,
@@ -161,6 +191,30 @@ class NotificationEventSettingsStore {
         [type]: { systemEnabled },
       },
     }
+    this.persist()
+    this.notify()
+  }
+
+  setChildSessionCompletionEnabled(childSessionCompletionEnabled: boolean) {
+    this.state = {
+      ...this.state,
+      childSessionCompletionEnabled,
+    }
+    this.persist()
+    this.notify()
+  }
+
+  setTaskbarAttentionEnabled(taskbarAttentionEnabled: boolean) {
+    this.state = {
+      ...this.state,
+      taskbarAttentionEnabled,
+    }
+    this.persist()
+    this.notify()
+  }
+
+  importSettings(raw: unknown) {
+    this.state = normalizeSettings(raw)
     this.persist()
     this.notify()
   }
@@ -173,7 +227,7 @@ export function exportNotificationEventSettingsBackup(): NotificationEventSettin
 }
 
 export function importNotificationEventSettingsBackup(raw: unknown): void {
-  saveSettings(normalizeSettings(raw))
+  notificationEventSettingsStore.importSettings(raw)
 }
 
 export function useNotificationEventSettings(): NotificationEventSettings {

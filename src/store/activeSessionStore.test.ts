@@ -44,4 +44,14 @@ describe('activeSessionStore scoped refresh handling', () => {
       description: 'Need approval',
     })
   })
+
+  it('reports whether a request is still pending by request ID', () => {
+    activeSessionStore.addPendingRequest('req-child', 'child', 'permission', 'Need approval')
+
+    expect(activeSessionStore.hasPendingRequest('req-child')).toBe(true)
+
+    activeSessionStore.resolvePendingRequest('req-child')
+
+    expect(activeSessionStore.hasPendingRequest('req-child')).toBe(false)
+  })
 })

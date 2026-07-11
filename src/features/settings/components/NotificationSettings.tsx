@@ -23,6 +23,7 @@ import {
 import { soundStore, useSoundSettings } from '../../../store/soundStore'
 import { Toggle, SettingRow, SettingsCard } from './SettingsUI'
 import { BUILTIN_SOUNDS, SOUND_OPTIONS, isSoundSupported, playSound } from '../../../utils/soundPlayer'
+import { getDesktopPlatform, isTauri } from '../../../utils/tauri'
 import type { NotificationType } from '../../../store/notificationStore'
 
 // ============================================
@@ -356,6 +357,8 @@ export function NotificationSettings() {
     permission: notificationPermission,
     sendNotification,
   } = useNotification()
+  const notificationEventSettings = useNotificationEventSettings()
+  const taskbarAttentionSupported = isTauri() && getDesktopPlatform() === 'windows'
   const [toastEnabled, setToastEnabledState] = useState(notificationStore.toastEnabled)
   const soundSettings = useSoundSettings()
   const soundSupported = isSoundSupported()
@@ -444,6 +447,49 @@ export function NotificationSettings() {
                 </div>
               </div>
             )}
+
+            <div className="border-t border-border-200/35 pt-3">
+              <SettingRow
+                label={t('notifications.childSessionCompletion')}
+                description={t('notifications.childSessionCompletionDesc')}
+                icon={<CheckIcon size={14} className="text-green-400" />}
+                onClick={() =>
+                  notificationEventSettingsStore.setChildSessionCompletionEnabled(
+                    !notificationEventSettings.childSessionCompletionEnabled,
+                  )
+                }
+              >
+                <Toggle
+                  enabled={notificationEventSettings.childSessionCompletionEnabled}
+                  onChange={() =>
+                    notificationEventSettingsStore.setChildSessionCompletionEnabled(
+                      !notificationEventSettings.childSessionCompletionEnabled,
+                    )
+                  }
+                />
+              </SettingRow>
+              {taskbarAttentionSupported && (
+                <SettingRow
+                  label={t('notifications.taskbarAttention')}
+                  description={t('notifications.taskbarAttentionDesc')}
+                  icon={<BellIcon size={14} />}
+                  onClick={() =>
+                    notificationEventSettingsStore.setTaskbarAttentionEnabled(
+                      !notificationEventSettings.taskbarAttentionEnabled,
+                    )
+                  }
+                >
+                  <Toggle
+                    enabled={notificationEventSettings.taskbarAttentionEnabled}
+                    onChange={() =>
+                      notificationEventSettingsStore.setTaskbarAttentionEnabled(
+                        !notificationEventSettings.taskbarAttentionEnabled,
+                      )
+                    }
+                  />
+                </SettingRow>
+              )}
+            </div>
           </div>
         </SettingsCard>
 

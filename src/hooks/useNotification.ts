@@ -9,7 +9,7 @@
 // Android Chrome 不支持 new Notification()，必须通过
 // ServiceWorkerRegistration.showNotification() 发送
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { STORAGE_KEY_NOTIFICATIONS_ENABLED } from '../constants/storage'
 import { isTauri } from '../utils/tauri'
 
@@ -17,7 +17,7 @@ import { isTauri } from '../utils/tauri'
 // Types
 // ============================================
 
-interface NotificationData {
+export interface NotificationData {
   sessionId: string
   directory?: string
 }
@@ -90,6 +90,58 @@ async function requestTauriPermission(): Promise<NotificationPermission> {
   }
 }
 
+function isSystemNotificationEnabled(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY_NOTIFICATIONS_ENABLED) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export async function sendSystemNotification(title: string, body: string, data?: NotificationData): Promise<void> {
+  if (!isSystemNotificationEnabled()) return
+
+  if (isTauri()) {
+    await sendTauriNotification(title, body)
+    return
+  }
+
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission !== 'granted') return
+
+  const notificationOptions: NotificationOptions = {
+    body,
+    icon: '/opencode.svg',
+    tag: data?.sessionId || 'opencode',
+    data,
+  }
+
+  try {
+    const reg = await ensureServiceWorker()
+    if (reg) {
+      await reg.showNotification(title, notificationOptions)
+      return
+    }
+  } catch {
+    // SW is unavailable, so fall back to the browser Notification API.
+  }
+
+  try {
+    const notification = new Notification(title, notificationOptions)
+    notification.onclick = () => {
+      window.focus()
+      if (data?.sessionId) {
+        const path = `#/session/${data.sessionId}`
+        const dir = data.directory ? `?dir=${data.directory}` : ''
+        window.location.hash = `${path}${dir}`
+      }
+      notification.close()
+    }
+  } catch {
+    // The Notification API may be unavailable in some environments.
+  }
+}
+
 // ============================================
 // Hook
 // ============================================
@@ -108,12 +160,6 @@ export function useNotification() {
     if (typeof Notification === 'undefined') return 'denied'
     return Notification.permission
   })
-
-  // 跟踪最新的 enabled 值，供 sendNotification 闭包使用
-  const enabledRef = useRef(enabled)
-  useEffect(() => {
-    enabledRef.current = enabled
-  }, [enabled])
 
   // Tauri: 异步获取初始权限状态
   useEffect(() => {
@@ -182,51 +228,7 @@ export function useNotification() {
 
   // 发送通知
   const sendNotification = useCallback(async (title: string, body: string, data?: NotificationData) => {
-    if (!enabledRef.current) return
-
-    // Tauri 原生通知
-    if (isTauri()) {
-      await sendTauriNotification(title, body)
-      return
-    }
-
-    // 浏览器通知
-    if (typeof Notification === 'undefined') return
-    if (Notification.permission !== 'granted') return
-
-    const notificationOptions: NotificationOptions = {
-      body,
-      icon: '/opencode.svg',
-      tag: data?.sessionId || 'opencode',
-      data,
-    }
-
-    // 优先用 SW showNotification（Android Chrome 必须用这个）
-    try {
-      const reg = await ensureServiceWorker()
-      if (reg) {
-        await reg.showNotification(title, notificationOptions)
-        return
-      }
-    } catch {
-      // SW 不可用，降级到 new Notification
-    }
-
-    // 降级：桌面浏览器直接用 new Notification
-    try {
-      const notification = new Notification(title, notificationOptions)
-      notification.onclick = () => {
-        window.focus()
-        if (data?.sessionId) {
-          const path = `#/session/${data.sessionId}`
-          const dir = data.directory ? `?dir=${data.directory}` : ''
-          window.location.hash = `${path}${dir}`
-        }
-        notification.close()
-      }
-    } catch {
-      // 通知 API 可能在某些环境不可用
-    }
+    await sendSystemNotification(title, body, data)
   }, [])
 
   const supported = isTauri() || typeof Notification !== 'undefined'
