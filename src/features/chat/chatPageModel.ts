@@ -1,13 +1,20 @@
 import type { Message } from '../../types/message'
 
-export const PAGE_MESSAGE_COUNT = 20
-export const PAGE_OVERSCAN_VIEWPORTS = 2
+export const PAGE_TARGET_RENDER_WEIGHT = 12
+export const PAGE_OVERSCAN_VIEWPORTS = 1
+export const EAGER_INITIAL_MESSAGE_LIMIT = 20
+export const EAGER_HEAVY_MESSAGE_LIMIT = 30
+export const EAGER_HEAVY_AVERAGE_WEIGHT = 24
+export const EAGER_TOTAL_RENDER_WEIGHT_LIMIT = 700
 
 export interface MessageGroupRow {
   key: string
   messages: Message[]
   messageIds: string[]
   estimatedHeight: number
+  renderWeight?: number
+  continuesFromPrevious?: boolean
+  continuesToNext?: boolean
 }
 
 export interface ChatPage {
@@ -15,6 +22,7 @@ export interface ChatPage {
   rows: MessageGroupRow[]
   messageIds: string[]
   estimatedHeight: number
+  renderWeight?: number
 }
 
 export interface StableChatPage extends ChatPage {
@@ -41,8 +49,71 @@ export type PageRenderSegment =
 
 export type ExpandedPageSelection = Set<number>
 
+const messageRenderWeightCache = new WeakMap<Message, number>()
+
 export function computeAnchorRestoreScrollDelta(previousTopOffset: number, nextTopOffset: number): number {
   return nextTopOffset - previousTopOffset
+}
+
+function countOccurrences(value: string, pattern: RegExp): number {
+  return value.match(pattern)?.length ?? 0
+}
+
+function estimateTextRenderWeight(text: string): number {
+  if (!text.trim()) return 0
+
+  const lineCount = countOccurrences(text, /\n/g) + 1
+  const fencedBlocks = Math.ceil(countOccurrences(text, /^\s*```/gm) / 2)
+  const mermaidBlocks = countOccurrences(text, /^\s*```mermaid\s*$/gim)
+  const images = countOccurrences(text, /!\[[^\]]*\]\([^)]*\)/g)
+
+  return Math.max(
+    1,
+    1 + Math.floor(text.length / 1400) + Math.floor(lineCount / 40) + fencedBlocks * 2 + mermaidBlocks * 4 + images * 2,
+  )
+}
+
+export function estimateMessageRenderWeight(message: Message): number {
+  const cached = messageRenderWeightCache.get(message)
+  if (cached != null) return cached
+
+  let weight = message.info.role === 'user' ? 1 : 2
+
+  for (const part of message.parts) {
+    switch (part.type) {
+      case 'text':
+        weight += part.synthetic ? 1 : estimateTextRenderWeight(part.text)
+        break
+      case 'reasoning':
+        weight += 1 + estimateTextRenderWeight(part.text)
+        break
+      case 'tool': {
+        const outputLength = part.state.output?.length ?? part.state.error?.length ?? 0
+        weight += 4 + Math.min(8, Math.floor(outputLength / 4000))
+        break
+      }
+      case 'file':
+        weight += 2
+        break
+      case 'subtask':
+        weight += 3
+        break
+      case 'step-finish':
+      case 'retry':
+        weight += 2
+        break
+      case 'agent':
+      case 'compaction':
+        weight += 1
+        break
+      default:
+        break
+    }
+  }
+
+  const result = Math.max(1, weight)
+  messageRenderWeightCache.set(message, result)
+  return result
 }
 
 function estimateMessageHeight(message: Message): number {
@@ -61,6 +132,33 @@ function estimateGroupHeight(messages: Message[]): number {
   return total
 }
 
+function estimateGroupRenderWeight(messages: Message[]): number {
+  return messages.reduce((total, message) => total + estimateMessageRenderWeight(message), 0)
+}
+
+function isActiveMessage(message: Message): boolean {
+  return message.isStreaming || (message.info.role === 'assistant' && message.info.time.completed == null)
+}
+
+function buildMessageGroupRow(
+  group: Message[],
+  options?: { continuesFromPrevious?: boolean; continuesToNext?: boolean },
+): MessageGroupRow {
+  const firstId = group[0]?.info.id ?? 'empty'
+  const lastId = group[group.length - 1]?.info.id ?? firstId
+  const estimatedHeight =
+    estimateGroupHeight(group) - (options?.continuesFromPrevious ? 4 : 0) - (options?.continuesToNext ? 12 : 0)
+  return {
+    key: `${firstId}:${lastId}:${group.length}`,
+    messages: group,
+    messageIds: group.map(message => message.info.id),
+    estimatedHeight,
+    renderWeight: estimateGroupRenderWeight(group),
+    continuesFromPrevious: options?.continuesFromPrevious,
+    continuesToNext: options?.continuesToNext,
+  }
+}
+
 function buildMessageGroups(messages: Message[]): MessageGroupRow[] {
   const groups: Message[][] = []
   for (const message of messages) {
@@ -72,33 +170,68 @@ function buildMessageGroups(messages: Message[]): MessageGroupRow[] {
     }
   }
 
-  return groups.map(group => {
-    const firstId = group[0]?.info.id ?? 'empty'
-    const lastId = group[group.length - 1]?.info.id ?? firstId
-    return {
-      key: `${firstId}:${lastId}:${group.length}`,
-      messages: group,
-      messageIds: group.map(message => message.info.id),
-      estimatedHeight: estimateGroupHeight(group),
+  return groups.map(group => buildMessageGroupRow(group))
+}
+
+function splitOversizedMessageGroups(rows: MessageGroupRow[], targetRenderWeight: number): MessageGroupRow[] {
+  return rows.flatMap(row => {
+    const hasActiveMessage = row.messages.some(isActiveMessage)
+    if (row.messages.length <= 1 || (!hasActiveMessage && (row.renderWeight ?? 0) <= targetRenderWeight)) {
+      return row
     }
+
+    const chunks: Message[][] = []
+    let currentChunk: Message[] = []
+    let currentWeight = 0
+    for (const message of row.messages) {
+      if (isActiveMessage(message)) {
+        if (currentChunk.length > 0) chunks.push(currentChunk)
+        chunks.push([message])
+        currentChunk = []
+        currentWeight = 0
+        continue
+      }
+      const messageWeight = estimateMessageRenderWeight(message)
+      if (currentChunk.length > 0 && currentWeight + messageWeight > targetRenderWeight) {
+        chunks.push(currentChunk)
+        currentChunk = []
+        currentWeight = 0
+      }
+      currentChunk.push(message)
+      currentWeight += messageWeight
+    }
+    if (currentChunk.length > 0) chunks.push(currentChunk)
+
+    return chunks.map((chunk, index) =>
+      buildMessageGroupRow(chunk, {
+        continuesFromPrevious: index > 0,
+        continuesToNext: index < chunks.length - 1,
+      }),
+    )
   })
 }
 
-export function buildChatPages(messages: Message[], pageMessageCount = PAGE_MESSAGE_COUNT): ChatPage[] {
-  const rows = buildMessageGroups(messages)
+export function buildChatPages(messages: Message[], targetRenderWeight = PAGE_TARGET_RENDER_WEIGHT): ChatPage[] {
+  const rows = splitOversizedMessageGroups(buildMessageGroups(messages), targetRenderWeight)
   const renderPages: ChatPage[] = []
 
   let currentRows: MessageGroupRow[] = []
-  let currentMessageCount = 0
+  let currentRenderWeight = 0
   for (let rowIndex = rows.length - 1; rowIndex >= 0; rowIndex--) {
     const row = rows[rowIndex]
-    if (currentRows.length > 0 && currentMessageCount + row.messages.length > pageMessageCount) {
+    const rowRenderWeight = row.renderWeight ?? estimateGroupRenderWeight(row.messages)
+    const separatesActiveMessage =
+      row.messages.some(isActiveMessage) || currentRows.some(currentRow => currentRow.messages.some(isActiveMessage))
+    if (
+      currentRows.length > 0 &&
+      (separatesActiveMessage || currentRenderWeight + rowRenderWeight > targetRenderWeight)
+    ) {
       renderPages.push(buildChatPage(currentRows))
       currentRows = []
-      currentMessageCount = 0
+      currentRenderWeight = 0
     }
     currentRows.unshift(row)
-    currentMessageCount += row.messages.length
+    currentRenderWeight += rowRenderWeight
   }
 
   if (currentRows.length > 0) {
@@ -117,15 +250,48 @@ function buildChatPage(rows: MessageGroupRow[]): ChatPage {
     rows,
     messageIds,
     estimatedHeight: rows.reduce((sum, row) => sum + row.estimatedHeight, 0),
+    renderWeight: rows.reduce((sum, row) => sum + (row.renderWeight ?? estimateGroupRenderWeight(row.messages)), 0),
   }
 }
 
-export function buildStableChatPages(messages: Message[], allocateKey: () => string, pageMessageCount = PAGE_MESSAGE_COUNT): StableChatPage[] {
-  return buildChatPages(messages, pageMessageCount).map(page => ({ ...page, key: allocateKey() }))
+export function buildStableChatPages(
+  messages: Message[],
+  allocateKey: (page: ChatPage) => string,
+  targetRenderWeight = PAGE_TARGET_RENDER_WEIGHT,
+): StableChatPage[] {
+  return buildChatPages(messages, targetRenderWeight).map(page => ({ ...page, key: allocateKey(page) }))
 }
 
-export function buildContentKeyedChatPages(messages: Message[], pageMessageCount = PAGE_MESSAGE_COUNT): StableChatPage[] {
-  return buildChatPages(messages, pageMessageCount)
+function buildInitialStableChatPages(
+  messages: Message[],
+  allocateKey: (page: ChatPage) => string,
+  targetRenderWeight: number,
+): StableChatPage[] {
+  if (!shouldKeepInitialMessagesTogether(messages)) {
+    return buildStableChatPages(messages, allocateKey, targetRenderWeight)
+  }
+  const page = buildChatPage(buildMessageGroups(messages))
+  return [{ ...page, key: allocateKey(page) }]
+}
+
+function shouldKeepInitialMessagesTogether(messages: Message[]): boolean {
+  if (messages.length > 1 && messages.some(isActiveMessage)) return false
+  if (messages.length > EAGER_HEAVY_MESSAGE_LIMIT) return false
+  const totalWeight = messages.reduce((sum, message) => sum + estimateMessageRenderWeight(message), 0)
+  if (totalWeight > EAGER_TOTAL_RENDER_WEIGHT_LIMIT) return false
+  if (messages.length <= EAGER_INITIAL_MESSAGE_LIMIT) return true
+  return totalWeight / messages.length >= EAGER_HEAVY_AVERAGE_WEIGHT
+}
+
+export function buildContentKeyedChatPages(
+  messages: Message[],
+  targetRenderWeight = PAGE_TARGET_RENDER_WEIGHT,
+): StableChatPage[] {
+  if (messages.length === 0) return []
+  if (shouldKeepInitialMessagesTogether(messages)) {
+    return [buildChatPage(buildMessageGroups(messages))]
+  }
+  return buildChatPages(messages, targetRenderWeight)
 }
 
 function flattenPageMessagesChronological(page: ChatPage): Message[] {
@@ -161,40 +327,51 @@ export function findMessageSequenceOffset(nextIds: string[], previousIds: string
 }
 
 function rebuildPageWithFreshMessages(page: StableChatPage, nextById: Map<string, Message>): StableChatPage {
+  let pageChanged = false
   const rows = page.rows.map(row => {
     const messages = row.messages.map(message => nextById.get(message.info.id) ?? message)
+    if (messages.every((message, index) => message === row.messages[index])) return row
+    pageChanged = true
     return {
       key: row.key,
       messages,
       messageIds: messages.map(message => message.info.id),
       estimatedHeight: estimateGroupHeight(messages),
+      renderWeight: estimateGroupRenderWeight(messages),
+      continuesFromPrevious: row.continuesFromPrevious,
+      continuesToNext: row.continuesToNext,
     }
   })
+
+  if (!pageChanged) return page
 
   return {
     key: page.key,
     rows,
     messageIds: rows.flatMap(row => row.messageIds),
     estimatedHeight: rows.reduce((sum, row) => sum + row.estimatedHeight, 0),
+    renderWeight: rows.reduce((sum, row) => sum + (row.renderWeight ?? estimateGroupRenderWeight(row.messages)), 0),
   }
 }
 
 export function reconcileStableChatPages(options: {
   currentPages: ChatPage[]
   nextMessages: Message[]
-  allocateKey: () => string
-  pageMessageCount?: number
+  allocateKey: (page: ChatPage) => string
+  targetRenderWeight?: number
 }): StableChatPage[] {
   const { currentPages, nextMessages, allocateKey } = options
-  const pageMessageCount = options.pageMessageCount ?? PAGE_MESSAGE_COUNT
+  const targetRenderWeight = options.targetRenderWeight ?? PAGE_TARGET_RENDER_WEIGHT
   if (nextMessages.length === 0) return []
-  if (currentPages.length === 0) return buildStableChatPages(nextMessages, allocateKey, pageMessageCount)
+  if (currentPages.length === 0) {
+    return buildInitialStableChatPages(nextMessages, allocateKey, targetRenderWeight)
+  }
 
   const previousIds = flattenPagesMessageIdsChronological(currentPages)
   const nextIds = nextMessages.map(message => message.info.id)
   const offset = findMessageSequenceOffset(nextIds, previousIds)
   if (offset === -1) {
-    return buildStableChatPages(nextMessages, allocateKey, pageMessageCount)
+    return buildInitialStableChatPages(nextMessages, allocateKey, targetRenderWeight)
   }
 
   const nextById = new Map(nextMessages.map(message => [message.info.id, message]))
@@ -204,16 +381,27 @@ export function reconcileStableChatPages(options: {
 
   let nextPages = refreshedPages
   if (suffixMessages.length > 0) {
-    const newestSegmentMessages = [
-      ...(refreshedPages.length > 0 ? flattenPageMessagesChronological(refreshedPages[0]) : []),
-      ...suffixMessages,
-    ]
-    const rebuiltNewestPages = buildStableChatPages(newestSegmentMessages, allocateKey, pageMessageCount)
-    nextPages = [...rebuiltNewestPages, ...refreshedPages.slice(1)]
+    const newestPage = refreshedPages[0]
+    const newestMessages = newestPage ? flattenPageMessagesChronological(newestPage) : []
+    const suffixWeight = suffixMessages.reduce((sum, message) => sum + estimateMessageRenderWeight(message), 0)
+    const suffixHasActiveMessage = suffixMessages.some(isActiveMessage)
+    const newestWeight = newestPage?.renderWeight ?? 0
+
+    if (
+      newestPage &&
+      !suffixHasActiveMessage &&
+      (shouldKeepInitialMessagesTogether(nextMessages) || newestWeight + suffixWeight <= targetRenderWeight)
+    ) {
+      const combinedPage = buildChatPage(buildMessageGroups([...newestMessages, ...suffixMessages]))
+      nextPages = [{ ...combinedPage, key: newestPage.key }, ...refreshedPages.slice(1)]
+    } else {
+      const appendedPages = buildStableChatPages(suffixMessages, allocateKey, targetRenderWeight)
+      nextPages = [...appendedPages, ...refreshedPages]
+    }
   }
 
   if (prefixMessages.length > 0) {
-    const prependedOlderPages = buildStableChatPages(prefixMessages, allocateKey, pageMessageCount)
+    const prependedOlderPages = buildStableChatPages(prefixMessages, allocateKey, targetRenderWeight)
     nextPages = [...nextPages, ...prependedOlderPages]
   }
 
