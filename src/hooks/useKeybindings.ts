@@ -82,10 +82,10 @@ export function useGlobalKeybindings(handlers: KeybindingHandlers, enabled = tru
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
       if (target.closest('.xterm')) return
 
-      // 检查是否有模态框/对话框/下拉菜单打开
+      // 检查是否有模态框/全屏层/下拉菜单打开
       // 如果有，只允许特定的快捷键通过
       const hasOpenDialog =
-        document.querySelector('[role="dialog"]') !== null ||
+        document.querySelector('[role="dialog"][aria-modal="true"]') !== null ||
         document.querySelector('[data-modal]') !== null ||
         document.querySelector('.fixed.inset-0') !== null
       const hasOpenDropdown = document.querySelector('[data-dropdown-open]') !== null

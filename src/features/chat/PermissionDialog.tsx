@@ -1,10 +1,12 @@
 import type { ApiPermissionRequest, PermissionReply } from '../../api'
+import { useEffect, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PermissionListIcon, UsersIcon, ReturnIcon, ChevronDownIcon } from '../../components/Icons'
 import { DiffView } from '../../components/DiffView'
 import { ContentBlock } from '../../components'
 import { childSessionStore, autoApproveStore } from '../../store'
 import { usePresence } from '../../hooks'
+import { keybindingStore, matchesKeybinding } from '../../store/keybindingStore'
 import { useChatViewport } from './chatViewport'
 
 interface PermissionDialogProps {
@@ -14,6 +16,7 @@ interface PermissionDialogProps {
   queueLength?: number // 队列中的请求数量
   isReplying?: boolean // 是否正在回复
   currentSessionId?: string | null // 当前主 session ID，用于判断是否来自子 agent
+  keyboardEnabled: boolean
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
 }
@@ -25,11 +28,13 @@ export function PermissionDialog({
   queueLength = 1,
   isReplying = false,
   currentSessionId,
+  keyboardEnabled,
   collapsed = false,
   onCollapsedChange,
 }: PermissionDialogProps) {
   const { t } = useTranslation(['chat', 'common'])
   const { presentation } = useChatViewport()
+  const titleId = useId()
   const isCompact = presentation.isCompact
   // 从 metadata 中提取 diff 信息
   const metadata = request.metadata
@@ -64,10 +69,48 @@ export function PermissionDialog({
     duration: 0.2,
   })
 
+  useEffect(() => {
+    if (!keyboardEnabled || collapsed || !shouldRender) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[data-dropdown-open]') !== null) return
+
+      const hasBlockingLayer =
+        document.querySelector('[role="dialog"][aria-modal="true"], [data-modal], .fixed.inset-0') !== null
+      if (hasBlockingLayer) return
+      if (event.isComposing || event.keyCode === 229) return
+
+      const isEscape = event.key === 'Escape'
+      const isPlainEnter =
+        event.key === 'Enter' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      const sendKey = keybindingStore.getKey('sendMessage')
+      const matchesSendKey = !!sendKey && matchesKeybinding(event, sendKey)
+
+      if (!isEscape && !isPlainEnter && !matchesSendKey) return
+      if (!isEscape && event.target instanceof Element && event.target.closest('[data-permission-dialog]')) return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      if (!isReplying) {
+        onReply(isEscape ? 'reject' : 'once')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [collapsed, isReplying, keyboardEnabled, onReply, shouldRender])
+
   if (!shouldRender) return null
 
   return (
-    <div ref={animRef} className="absolute bottom-0 left-0 right-0 z-[10]">
+    <div
+      ref={animRef}
+      className="absolute bottom-0 left-0 right-0 z-[10]"
+      role="region"
+      aria-labelledby={titleId}
+      data-permission-dialog
+    >
       <div
         className="mx-auto max-w-3xl pointer-events-auto transition-[max-width] duration-300 ease-in-out pb-2"
         style={{
@@ -84,7 +127,7 @@ export function PermissionDialog({
                 <div className="flex items-center justify-center text-text-100 w-5 h-5">
                   <PermissionListIcon size={20} />
                 </div>
-                <h3 className="text-[length:var(--fs-base)] leading-none font-medium text-text-100">
+                <h3 id={titleId} className="text-[length:var(--fs-base)] leading-none font-medium text-text-100">
                   {t('permissionDialog.permission', { permission: request.permission })}
                 </h3>
                 {queueLength > 1 && (

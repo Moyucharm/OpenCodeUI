@@ -967,6 +967,7 @@ export const ChatPane = memo(function ChatPane({
           queueLength={pendingPermissionRequests.length}
           isReplying={isReplying}
           currentSessionId={routeSessionId}
+          keyboardEnabled={isFocused}
           collapsed={permissionCollapsed}
           onCollapsedChange={setPermissionCollapsed}
         />
