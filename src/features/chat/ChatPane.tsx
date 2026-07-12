@@ -261,6 +261,8 @@ export const ChatPane = memo(function ChatPane({
     loadState,
     loadError,
     hasMoreHistory,
+    isLoadingHistory,
+    historyLoadError,
     retryStatus,
     effectiveDirectory,
 
@@ -832,9 +834,11 @@ export const ChatPane = memo(function ChatPane({
               allowStreamingLayoutAnimation={isAtBottom}
               loadState={renderedLoadState}
               loadError={loadError}
+              historyLoadError={historyLoadError}
               connectionError={connectionError}
               onOpenSettings={onOpenSettings}
               hasMoreHistory={hasMoreHistory}
+              isLoadingHistory={isLoadingHistory}
               onLoadMore={loadMoreHistory}
               onUndo={handleUndoWithAnimation}
               onFork={handleForkMessage}

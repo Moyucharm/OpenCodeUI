@@ -3,6 +3,9 @@
 // ============================================
 
 import type { Message, MessageError, Part } from '../types/message'
+import type { ApiSession } from '../api/types'
+
+export type HistoryPaginationMode = 'unknown' | 'cursor' | 'legacy'
 
 export interface RevertState {
   /** 撤销点的消息 ID */
@@ -33,6 +36,18 @@ export interface SessionState {
   loadError?: MessageError
   /** 是否还有更多历史消息 */
   hasMoreHistory: boolean
+  /** 下一页更早历史消息的游标 */
+  historyCursor?: string
+  /** 历史分页协议模式 */
+  paginationMode: HistoryPaginationMode
+  /** 是否正在加载更早的历史消息 */
+  isLoadingHistory: boolean
+  /** 加载更早历史消息失败时展示的错误 */
+  historyLoadError?: MessageError
+  /** 当前历史请求的单调世代，用于丢弃陈旧响应 */
+  historyGeneration: number
+  /** 尚未加载到内存的服务端撤销点 */
+  pendingRevertState?: ApiSession['revert']
   /** session 目录 */
   directory: string
   /** session 标题 */
@@ -76,6 +91,8 @@ export interface SessionStateSnapshot {
   redoSteps: number
   revertedContent: RevertHistoryItem | null
   hasMoreHistory: boolean
+  isLoadingHistory: boolean
+  historyLoadError?: MessageError
   directory: string
   title: string | null
 }

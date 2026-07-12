@@ -12,10 +12,22 @@ import type { Message, MessageError, Part, FilePart, AgentPart } from '../types/
 import type { ApiMessageWithParts, ApiMessage, ApiPart, ApiSession, Attachment } from '../api/types'
 import { logger } from '../utils/logger'
 import { isUserUIMessage, toUIMessage, toUIMessageInfo, toUIPart } from '../utils/messageConversion'
-import type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
+import type {
+  HistoryPaginationMode,
+  RevertState,
+  RevertHistoryItem,
+  SessionState,
+  SendRollbackSnapshot,
+} from './messageStoreTypes'
 
 // Re-export types for consumers
-export type { RevertState, RevertHistoryItem, SessionState, SendRollbackSnapshot } from './messageStoreTypes'
+export type {
+  HistoryPaginationMode,
+  RevertState,
+  RevertHistoryItem,
+  SessionState,
+  SendRollbackSnapshot,
+} from './messageStoreTypes'
 
 type Subscriber = () => void
 
@@ -28,6 +40,7 @@ class MessageStore {
   private sessionVersions = new Map<string, number>()
   private allSessionsVersion = 0
   private changeVersion = 0
+  private nextHistoryGeneration = 0
   private sessionAccessTime = new Map<string, number>()
   /** 被分屏 pane 保护的 sessionId 集合，evict 时跳过 */
   private protectedSessions = new Set<string>()
@@ -184,7 +197,7 @@ class MessageStore {
     if (!state) return []
 
     const { messages, revertState } = state
-    if (!revertState) return messages
+    if (!revertState) return state.pendingRevertState ? [] : messages
 
     const revertIndex = messages.findIndex(m => m.info.id === revertState.messageId)
     return revertIndex === -1 ? messages : messages.slice(0, revertIndex)
@@ -249,6 +262,12 @@ class MessageStore {
         isStreaming: false,
         loadState: 'idle',
         hasMoreHistory: false,
+        historyCursor: undefined,
+        paginationMode: 'unknown',
+        isLoadingHistory: false,
+        historyLoadError: undefined,
+        historyGeneration: 0,
+        pendingRevertState: undefined,
         directory: '',
         title: undefined,
         loadError: undefined,
@@ -258,6 +277,11 @@ class MessageStore {
       this.sessions.set(sessionId, state)
     }
     return state
+  }
+
+  private invalidateHistoryLoadState(state: SessionState) {
+    state.historyGeneration = ++this.nextHistoryGeneration
+    state.isLoadingHistory = false
   }
 
   private evictOldSessions() {
@@ -302,6 +326,7 @@ class MessageStore {
       loadState?: SessionState['loadState']
       shareUrl?: string
       loadError?: MessageError
+      revertState?: ApiSession['revert'] | null
     },
   ) {
     const state = this.sessions.get(sessionId)
@@ -313,7 +338,64 @@ class MessageStore {
     if (options.loadState !== undefined) state.loadState = options.loadState
     if (options.loadError !== undefined) state.loadError = options.loadError
     if (options.shareUrl !== undefined) state.shareUrl = options.shareUrl
+    if (options.revertState !== undefined) this.applyApiRevertState(state, options.revertState)
 
+    this.notify([sessionId])
+  }
+
+  beginHistoryLoad(sessionId: string): number | null {
+    const state = this.ensureSession(sessionId)
+    if (state.isLoadingHistory) return null
+
+    const generation = ++this.nextHistoryGeneration
+    state.historyGeneration = generation
+    state.isLoadingHistory = true
+    state.historyLoadError = undefined
+    this.notify([sessionId])
+    return generation
+  }
+
+  isCurrentHistoryLoad(sessionId: string, generation: number): boolean {
+    const state = this.sessions.get(sessionId)
+    return state?.isLoadingHistory === true && state.historyGeneration === generation
+  }
+
+  completeHistoryLoad(
+    sessionId: string,
+    generation: number,
+    options: {
+      historyCursor: string | undefined
+      paginationMode: HistoryPaginationMode
+      hasMoreHistory: boolean
+    },
+  ): boolean {
+    const state = this.sessions.get(sessionId)
+    if (!state || !state.isLoadingHistory || state.historyGeneration !== generation) return false
+
+    state.historyCursor = options.historyCursor
+    state.paginationMode = options.paginationMode
+    state.hasMoreHistory = options.hasMoreHistory
+    state.isLoadingHistory = false
+    state.historyLoadError = undefined
+    this.notify([sessionId])
+    return true
+  }
+
+  failHistoryLoad(sessionId: string, generation: number, error: MessageError): boolean {
+    const state = this.sessions.get(sessionId)
+    if (!state || !state.isLoadingHistory || state.historyGeneration !== generation) return false
+
+    state.isLoadingHistory = false
+    state.historyLoadError = error
+    this.notify([sessionId])
+    return true
+  }
+
+  invalidateHistoryLoad(sessionId: string) {
+    const state = this.sessions.get(sessionId)
+    if (!state) return
+
+    this.invalidateHistoryLoadState(state)
     this.notify([sessionId])
   }
 
@@ -355,6 +437,7 @@ class MessageStore {
 
   setLoadState(sessionId: string, loadState: SessionState['loadState']) {
     const state = this.ensureSession(sessionId)
+    if (loadState === 'loading') this.invalidateHistoryLoadState(state)
     state.loadState = loadState
     if (loadState !== 'error') state.loadError = undefined
     this.notify([sessionId])
@@ -378,6 +461,8 @@ class MessageStore {
       directory?: string
       title?: string
       hasMoreHistory?: boolean
+      historyCursor?: string
+      paginationMode?: HistoryPaginationMode
       revertState?: ApiSession['revert'] | null
       shareUrl?: string
       inferStreaming?: boolean
@@ -385,37 +470,20 @@ class MessageStore {
   ) {
     const state = this.ensureSession(sessionId)
 
+    this.invalidateHistoryLoadState(state)
     state.messages = apiMessages.map(toUIMessage)
     state.loadState = 'loaded'
     state.loadError = undefined
     state.hasMoreHistory = options?.hasMoreHistory ?? false
+    state.historyCursor = options?.historyCursor
+    state.paginationMode = options?.paginationMode ?? 'unknown'
+    state.historyLoadError = undefined
     state.directory = options?.directory ?? ''
     if (options?.title !== undefined) state.title = options.title
     state.shareUrl = options?.shareUrl
     state.isStale = false
 
-    // Revert 状态
-    if (options?.revertState?.messageID) {
-      const revertIndex = state.messages.findIndex(m => m.info.id === options.revertState!.messageID)
-      if (revertIndex !== -1) {
-        const revertedUserMessages = state.messages.slice(revertIndex).filter(isUserUIMessage)
-        state.revertState = {
-          messageId: options.revertState.messageID,
-          history: revertedUserMessages.map(m => {
-            return {
-              messageId: m.info.id,
-              text: this.extractUserText(m),
-              attachments: this.extractUserAttachments(m),
-              model: m.info.model,
-              variant: m.info.model.variant,
-              agent: m.info.agent,
-            }
-          }),
-        }
-      }
-    } else {
-      state.revertState = null
-    }
+    this.applyApiRevertState(state, options?.revertState ?? null)
 
     // Streaming 检测
     const inferStreaming = options?.inferStreaming ?? true
@@ -434,6 +502,48 @@ class MessageStore {
     this.notify([sessionId])
   }
 
+  mergeMessages(
+    sessionId: string,
+    apiMessages: ApiMessageWithParts[],
+    options?: {
+      preserveHistory?: boolean
+      preserveStreaming?: boolean
+      revertState?: ApiSession['revert'] | null
+    },
+  ) {
+    const state = this.ensureSession(sessionId)
+    const existingById = new Map(state.messages.map(message => [message.info.id, message]))
+    const snapshotMessages = new Map(apiMessages.map(message => {
+      const uiMessage = toUIMessage(message)
+      const existing = existingById.get(uiMessage.info.id)
+      return [uiMessage.info.id, options?.preserveStreaming && existing?.isStreaming ? existing : uiMessage] as const
+    }))
+    const existingMessages = options?.preserveHistory
+      ? state.messages.filter(message => !snapshotMessages.has(message.info.id))
+      : []
+
+    this.invalidateHistoryLoadState(state)
+    state.messages = [...existingMessages, ...snapshotMessages.values()].sort((a, b) => {
+      const aCreated = a.info.time?.created ?? 0
+      const bCreated = b.info.time?.created ?? 0
+      return aCreated - bCreated
+    })
+    state.loadState = 'loaded'
+    state.loadError = undefined
+    state.isStale = false
+    this.applyApiRevertState(state, options?.revertState)
+
+    const lastIndex = state.messages.length - 1
+    const lastMessage = state.messages[lastIndex]
+    const isLastMessageStreaming = options?.preserveStreaming === true && lastMessage?.isStreaming === true
+    state.isStreaming = isLastMessageStreaming
+    if (lastMessage) {
+      state.messages[lastIndex] = { ...lastMessage, isStreaming: isLastMessageStreaming }
+    }
+
+    this.notify([sessionId])
+  }
+
   prependMessages(sessionId: string, apiMessages: ApiMessageWithParts[], hasMore: boolean) {
     const state = this.sessions.get(sessionId)
     if (!state) return
@@ -447,6 +557,7 @@ class MessageStore {
     if (unique.length > 0) {
       state.messages = [...unique, ...state.messages]
     }
+    this.applyApiRevertState(state, state.pendingRevertState)
     state.hasMoreHistory = hasMore
 
     this.notify([sessionId])
@@ -671,6 +782,7 @@ class MessageStore {
     const state = this.sessions.get(sessionId)
     if (!state) return
     state.revertState = revertState
+    state.pendingRevertState = undefined
     this.notify([sessionId])
   }
 
@@ -729,6 +841,36 @@ class MessageStore {
       .filter((p): p is Part & { type: 'text' } => p.type === 'text' && !p.synthetic)
       .map(p => p.text)
       .join('\n')
+  }
+
+  private applyApiRevertState(state: SessionState, revertState: ApiSession['revert'] | null | undefined) {
+    if (revertState === undefined) return
+    if (!revertState?.messageID) {
+      state.revertState = null
+      state.pendingRevertState = undefined
+      return
+    }
+
+    const revertIndex = state.messages.findIndex(message => message.info.id === revertState.messageID)
+    if (revertIndex === -1) {
+      state.revertState = null
+      state.pendingRevertState = revertState
+      return
+    }
+
+    const revertedUserMessages = state.messages.slice(revertIndex).filter(isUserUIMessage)
+    state.pendingRevertState = undefined
+    state.revertState = {
+      messageId: revertState.messageID,
+      history: revertedUserMessages.map(message => ({
+        messageId: message.info.id,
+        text: this.extractUserText(message),
+        attachments: this.extractUserAttachments(message),
+        model: message.info.model,
+        variant: message.info.model.variant,
+        agent: message.info.agent,
+      })),
+    }
   }
 
   private extractUserAttachments(message: Message): Attachment[] {

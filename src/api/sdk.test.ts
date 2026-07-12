@@ -72,4 +72,29 @@ describe('sdk request lifecycle', () => {
     })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  it('forwards a signal carried by an SDK Request', async () => {
+    const { abortInFlightApiRequests, getSDKClient } = await import('./sdk')
+    const externalController = new AbortController()
+    let fetchSignal: AbortSignal | undefined
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => {
+      fetchSignal = init?.signal ?? undefined
+      return new Promise<Response>((_resolve, reject) => {
+        fetchSignal?.addEventListener('abort', () => reject(fetchSignal?.reason), { once: true })
+      })
+    })
+
+    const client = getSDKClient() as unknown as MockClient
+    const request = client.config.fetch(new Request('http://127.0.0.1:4096/session/session-1/message', {
+      signal: externalController.signal,
+    }))
+
+    externalController.abort(new Error('Timed out loading history'))
+    await Promise.resolve()
+
+    expect(fetchSignal?.aborted).toBe(true)
+    abortInFlightApiRequests('reset test state')
+    await expect(request).rejects.toBeDefined()
+  })
 })

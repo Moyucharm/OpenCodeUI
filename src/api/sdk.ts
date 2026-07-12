@@ -37,7 +37,7 @@ function createAbortError(message: string) {
 
 async function trackedFetch(input: RequestInfo | URL, init: RequestInit | undefined, generation: number): Promise<Response> {
   const controller = new AbortController()
-  const externalSignal = init?.signal
+  const externalSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined)
   const abortFromExternal = () => controller.abort(externalSignal?.reason)
 
   if (externalSignal?.aborted) {

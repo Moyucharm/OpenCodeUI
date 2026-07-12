@@ -1,6 +1,7 @@
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
+import type { MessageError } from '../types/message'
 import { messageStore } from './messageStore'
 import { useSessionState } from './messageStoreHooks'
 
@@ -102,5 +103,40 @@ describe('useSessionState', () => {
 
     expect(renderCount).toBe(1)
     expect(result.current?.messages.map(message => message.info.id)).toEqual(['message-1'])
+  })
+
+  it('updates a subscribed session snapshot for history loading and errors', async () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)])
+    const { result } = renderHook(() => useSessionState('session-1'))
+    expect(result.current).toMatchObject({
+      isLoadingHistory: false,
+      historyLoadError: undefined,
+    })
+
+    let generation: number | null = null
+    await act(async () => {
+      generation = messageStore.beginHistoryLoad('session-1')
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    })
+    const currentGeneration = generation
+    if (currentGeneration === null) throw new Error('Expected the history load to start')
+    expect(result.current).toMatchObject({
+      isLoadingHistory: true,
+      historyLoadError: undefined,
+    })
+
+    const error: MessageError = {
+      name: 'APIError',
+      data: { message: 'Could not load older messages', isRetryable: true },
+    }
+    await act(async () => {
+      messageStore.failHistoryLoad('session-1', currentGeneration, error)
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    })
+
+    expect(result.current).toMatchObject({
+      isLoadingHistory: false,
+      historyLoadError: error,
+    })
   })
 })

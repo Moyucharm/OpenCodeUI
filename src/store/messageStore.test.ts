@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
+import type { MessageError } from '../types/message'
 import { messageStore } from './messageStore'
 
-function createAssistantMessage(id: string, sessionID = 'session-1'): ApiMessage {
+function createAssistantMessage(id: string, sessionID = 'session-1', created = 1): ApiMessage {
   return {
     id,
     sessionID,
@@ -24,7 +25,7 @@ function createAssistantMessage(id: string, sessionID = 'session-1'): ApiMessage
       cache: { read: 0, write: 0 },
     },
     time: {
-      created: 1,
+      created,
       completed: 2,
     },
   }
@@ -45,9 +46,9 @@ function createTextPart(
   }
 }
 
-function createMessageWithParts(id: string, text: string, sessionID = 'session-1'): ApiMessageWithParts {
+function createMessageWithParts(id: string, text: string, sessionID = 'session-1', created = 1): ApiMessageWithParts {
   return {
-    info: createAssistantMessage(id, sessionID),
+    info: createAssistantMessage(id, sessionID, created),
     parts: [createTextPart(`part-${id}`, id, text, sessionID)],
   }
 }
@@ -184,6 +185,176 @@ describe('messageStore', () => {
     messageStore.setStreaming('session-1', false)
 
     expect(messageStore.getSessionState('session-1')).toBeUndefined()
+  })
+
+  it('rejects a concurrent history load for the same session', () => {
+    const firstGeneration = messageStore.beginHistoryLoad('session-1')
+    const secondGeneration = messageStore.beginHistoryLoad('session-1')
+
+    expect(firstGeneration).toEqual(expect.any(Number))
+    expect(secondGeneration).toBeNull()
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      isLoadingHistory: true,
+      historyLoadError: undefined,
+    })
+  })
+
+  it('ignores stale history completion after a session reload and commits the current completion', () => {
+    const staleGeneration = messageStore.beginHistoryLoad('session-1')
+    if (staleGeneration === null) throw new Error('Expected the first history load to start')
+
+    messageStore.setLoadState('session-1', 'loading')
+
+    expect(messageStore.isCurrentHistoryLoad('session-1', staleGeneration)).toBe(false)
+    expect(
+      messageStore.completeHistoryLoad('session-1', staleGeneration, {
+        historyCursor: 'stale-cursor',
+        paginationMode: 'cursor',
+        hasMoreHistory: true,
+      }),
+    ).toBe(false)
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      historyCursor: undefined,
+      paginationMode: 'unknown',
+      hasMoreHistory: false,
+    })
+
+    const currentGeneration = messageStore.beginHistoryLoad('session-1')
+    if (currentGeneration === null) throw new Error('Expected the current history load to start')
+
+    expect(
+      messageStore.completeHistoryLoad('session-1', currentGeneration, {
+        historyCursor: 'next-cursor',
+        paginationMode: 'cursor',
+        hasMoreHistory: true,
+      }),
+    ).toBe(true)
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      historyCursor: 'next-cursor',
+      paginationMode: 'cursor',
+      hasMoreHistory: true,
+      isLoadingHistory: false,
+      historyLoadError: undefined,
+    })
+  })
+
+  it('keeps loaded history and cursor when a latest-page refresh merges a 100-message session', () => {
+    const history = Array.from({ length: 100 }, (_, index) => {
+      const messageNumber = index + 1
+      return createMessageWithParts(`message-${messageNumber}`, `message ${messageNumber}`, 'session-1', messageNumber)
+    })
+    messageStore.setMessages('session-1', history, {
+      historyCursor: 'older-page',
+      paginationMode: 'cursor',
+      hasMoreHistory: true,
+    })
+
+    const generation = messageStore.beginHistoryLoad('session-1')
+    if (generation === null) throw new Error('Expected the history load to start')
+
+    messageStore.mergeMessages(
+      'session-1',
+      [
+        createMessageWithParts('message-100', 'updated latest message', 'session-1', 100),
+        createMessageWithParts('message-101', 'new latest message', 'session-1', 101),
+      ],
+      { preserveHistory: true },
+    )
+
+    const state = messageStore.getSessionState('session-1')
+    expect(messageStore.isCurrentHistoryLoad('session-1', generation)).toBe(false)
+    expect(state?.messages).toHaveLength(101)
+    expect(state?.messages.map(message => message.info.id)).toEqual([
+      ...Array.from({ length: 101 }, (_, index) => `message-${index + 1}`),
+    ])
+    expect(state?.messages[99]?.parts[0]).toMatchObject({ text: 'updated latest message' })
+    expect(state).toMatchObject({
+      historyCursor: 'older-page',
+      paginationMode: 'cursor',
+      hasMoreHistory: true,
+    })
+  })
+
+  it('clears streaming when a completed latest snapshot replaces a streaming message', () => {
+    messageStore.setMessages('session-1', [createIncompleteMessageWithParts('message-1', 'partial')])
+    expect(messageStore.getSessionState('session-1')).toMatchObject({ isStreaming: true })
+    expect(messageStore.getSessionState('session-1')?.messages[0]?.isStreaming).toBe(true)
+
+    messageStore.mergeMessages('session-1', [createMessageWithParts('message-1', 'complete')], {
+      preserveHistory: true,
+    })
+
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.isStreaming).toBe(false)
+    expect(state?.messages[0]?.isStreaming).toBe(false)
+  })
+
+  it('keeps an idle session idle when a persisted incomplete snapshot is refreshed', () => {
+    messageStore.setMessages('session-1', [createIncompleteMessageWithParts('message-1', 'persisted')], {
+      inferStreaming: false,
+    })
+
+    messageStore.mergeMessages('session-1', [createIncompleteMessageWithParts('message-1', 'persisted')], {
+      preserveHistory: true,
+    })
+
+    expect(messageStore.getSessionState('session-1')?.isStreaming).toBe(false)
+  })
+
+  it('keeps a local streaming message when a refresh snapshot is older', () => {
+    messageStore.setMessages('session-1', [createIncompleteMessageWithParts('message-1', 'live text')])
+
+    messageStore.mergeMessages('session-1', [createMessageWithParts('message-1', 'stale snapshot')], {
+      preserveHistory: true,
+      preserveStreaming: true,
+    })
+
+    const state = messageStore.getSessionState('session-1')
+    expect(state?.isStreaming).toBe(true)
+    expect(state?.messages[0]?.parts[0]).toMatchObject({ text: 'live text' })
+  })
+
+  it('applies a server revert when merging a latest-page snapshot', () => {
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one', 'session-1', 1),
+      createMessageWithParts('message-2', 'two', 'session-1', 2),
+    ])
+
+    messageStore.mergeMessages('session-1', [createMessageWithParts('message-2', 'updated two', 'session-1', 2)], {
+      preserveHistory: true,
+      revertState: { messageID: 'message-2' },
+    })
+
+    expect(messageStore.getSessionState('session-1')?.revertState?.messageId).toBe('message-2')
+  })
+
+  it('defers a server revert until its target arrives from older history', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-2', 'two', 'session-1', 2)], {
+      revertState: { messageID: 'message-1' },
+    })
+
+    expect(messageStore.getVisibleMessages('session-1')).toEqual([])
+    expect(messageStore.getSessionState('session-1')?.pendingRevertState).toEqual({ messageID: 'message-1' })
+
+    messageStore.prependMessages('session-1', [createMessageWithParts('message-1', 'one', 'session-1', 1)], false)
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      revertState: { messageId: 'message-1' },
+      pendingRevertState: undefined,
+    })
+  })
+
+  it('only records a history error for the current history load', () => {
+    const staleGeneration = messageStore.beginHistoryLoad('session-1')
+    if (staleGeneration === null) throw new Error('Expected the history load to start')
+    messageStore.invalidateHistoryLoad('session-1')
+
+    const error: MessageError = {
+      name: 'APIError',
+      data: { message: 'stale failure', isRetryable: true },
+    }
+    expect(messageStore.failHistoryLoad('session-1', staleGeneration, error)).toBe(false)
+    expect(messageStore.getSessionState('session-1')?.historyLoadError).toBeUndefined()
   })
 
   it('flushes mutable part deltas for multiple sessions in the same frame', () => {

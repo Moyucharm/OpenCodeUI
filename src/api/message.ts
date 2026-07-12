@@ -65,6 +65,27 @@ export async function getSessionMessages(
   )
 }
 
+export async function getSessionMessagePage(
+  sessionId: string,
+  options: { directory?: string; limit: number; before?: string; signal?: AbortSignal },
+): Promise<{ messages: ApiMessageWithParts[]; nextCursor: string | undefined }> {
+  const sdk = getSDKClient()
+  const params = {
+    sessionID: sessionId,
+    directory: formatPathForApi(options.directory),
+    limit: options.limit,
+    before: options.before,
+  }
+  const result = options.signal
+    ? await sdk.session.messages(params, { signal: options.signal })
+    : await sdk.session.messages(params)
+
+  return {
+    messages: unwrap<ApiMessageWithParts[]>(result),
+    nextCursor: result.response.headers.get('X-Next-Cursor') ?? undefined,
+  }
+}
+
 /**
  * 获取 session 的消息数量
  */

@@ -14,6 +14,7 @@ import {
   findMessageSequenceOffset,
   reconcileStableChatPages,
   seedMeasuredPageHeightsFromPreviousPages,
+  shouldRestoreLoadMoreAnchor,
 } from './chatPageModel'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
 import { buildChatPageViewModel } from './useChatPageViewModel'
@@ -701,5 +702,29 @@ describe('computeAnchorRestoreScrollDelta', () => {
 
   it('returns a negative value when the anchor drifted upward', () => {
     expect(computeAnchorRestoreScrollDelta(180, 24)).toBe(-156)
+  })
+})
+
+describe('shouldRestoreLoadMoreAnchor', () => {
+  it('restores an anchor when prepended history changes an existing page without increasing page count', () => {
+    expect(
+      shouldRestoreLoadMoreAnchor(
+        'message-2',
+        [{ messageIds: ['message-1', 'message-2'] }],
+        2,
+        3,
+      ),
+    ).toBe(true)
+  })
+
+  it('does not consume the history anchor for a streaming update without prepended messages', () => {
+    expect(
+      shouldRestoreLoadMoreAnchor(
+        'message-2',
+        [{ messageIds: ['message-1', 'message-2'] }],
+        2,
+        2,
+      ),
+    ).toBe(false)
   })
 })

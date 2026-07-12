@@ -74,6 +74,8 @@ const EMPTY_SESSION_STATE = {
   redoSteps: 0,
   revertedContent: null,
   hasMoreHistory: false,
+  isLoadingHistory: false,
+  historyLoadError: undefined,
   directory: '',
   title: null,
 } as const
@@ -163,6 +165,8 @@ export function useChatSession({
   const redoSteps = perSessionState.redoSteps
   const revertedContent = perSessionState.revertedContent
   const hasMoreHistory = perSessionState.hasMoreHistory
+  const isLoadingHistory = perSessionState.isLoadingHistory
+  const historyLoadError = perSessionState.historyLoadError
   const loadState = routeSessionId ? perSessionState.loadState : ('idle' as const)
   const loadError = routeSessionId ? perSessionState.loadError : undefined
 
@@ -1135,6 +1139,8 @@ export function useChatSession({
     loadState,
     loadError,
     hasMoreHistory,
+    isLoadingHistory,
+    historyLoadError,
     retryStatus,
     agents,
     selectedAgent,

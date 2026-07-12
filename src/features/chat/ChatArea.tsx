@@ -39,6 +39,7 @@ import {
   buildPageOffsets,
   buildPageRenderSegments,
   computeAnchorRestoreScrollDelta,
+  shouldRestoreLoadMoreAnchor,
   buildTurnDurationMap,
   computeExpandedPageRange,
   expandSelectionWithPageKeys,
@@ -56,7 +57,7 @@ const PENDING_LAYOUT_ANCHOR_TIMEOUT_MS = 300
 type LoadMoreAnchorSnapshot = {
   messageId: string
   topOffset: number
-  pageCountBefore: number
+  messageCountBefore: number
 }
 
 /** Stable no-op to avoid creating a new closure on every render. */
@@ -74,7 +75,7 @@ function pageHasUserMessage(page: ChatPage): boolean {
   return page.rows.some(row => row.messages.some(message => message.info.role === 'user'))
 }
 
-function captureLoadMoreAnchor(root: HTMLElement, pageCountBefore = 0): LoadMoreAnchorSnapshot | null {
+function captureLoadMoreAnchor(root: HTMLElement, messageCountBefore = 0): LoadMoreAnchorSnapshot | null {
   const rootRect = root.getBoundingClientRect()
   const candidates = root.querySelectorAll<HTMLElement>('[data-message-id]')
 
@@ -88,9 +89,7 @@ function captureLoadMoreAnchor(root: HTMLElement, pageCountBefore = 0): LoadMore
     if (!intersectsViewport) continue
 
     const topOffset = rect.top - rootRect.top
-    if (!best || topOffset < best.topOffset) {
-      best = { messageId, topOffset, pageCountBefore }
-    }
+    if (!best || topOffset < best.topOffset) best = { messageId, topOffset, messageCountBefore }
   }
 
   return best
@@ -107,9 +106,11 @@ interface ChatAreaProps {
   allowStreamingLayoutAnimation?: boolean
   loadState?: 'idle' | 'loading' | 'loaded' | 'error'
   loadError?: MessageError
+  historyLoadError?: MessageError
   connectionError?: MessageError
   onOpenSettings?: () => void
   hasMoreHistory?: boolean
+  isLoadingHistory?: boolean
   onLoadMore?: () => void | Promise<void>
   onUndo?: (userMessageId: string) => void
   onFork?: (message: Message, forkMessageId?: string) => void | Promise<void>
@@ -143,6 +144,7 @@ export const ChatArea = memo(
         allowStreamingLayoutAnimation = true,
         loadState = 'idle',
         loadError,
+        historyLoadError,
         connectionError,
         onOpenSettings,
         onLoadMore,
@@ -150,6 +152,7 @@ export const ChatArea = memo(
         onFork,
         canUndo,
         hasMoreHistory: _hasMoreHistory = false,
+        isLoadingHistory = false,
         registerMessage,
         retryStatus = null,
         bottomPadding = 0,
@@ -551,7 +554,7 @@ export const ChatArea = memo(
 
         const root = scrollRef.current
         if (root) {
-          const anchor = captureLoadMoreAnchor(root, activePages.length)
+          const anchor = captureLoadMoreAnchor(root, visibleMessages.length)
           pendingLoadMoreAnchorRef.current = anchor
           setPendingLoadMoreAnchorMessageId(anchor?.messageId ?? null)
         }
@@ -565,7 +568,7 @@ export const ChatArea = memo(
           isLoadingRef.current = false
           setIsLoadingMore(false)
         })
-      }, [activePages.length, clearPendingLoadMoreTimer, sessionId])
+      }, [clearPendingLoadMoreTimer, sessionId, visibleMessages.length])
 
       useEffect(() => {
         tryLoadMoreRef.current = tryLoadMore
@@ -600,7 +603,16 @@ export const ChatArea = memo(
         const anchor = pendingLoadMoreAnchorRef.current
         const root = scrollRef.current
         if (!anchor || !root) return
-        if (activePages.length <= anchor.pageCountBefore) return
+        if (
+          !shouldRestoreLoadMoreAnchor(
+            anchor?.messageId ?? null,
+            activePages,
+            anchor?.messageCountBefore ?? 0,
+            visibleMessages.length,
+          )
+        ) {
+          return
+        }
 
         const target = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
         if (!target) return
@@ -615,7 +627,7 @@ export const ChatArea = memo(
           root.scrollTop += delta
           updateScrollOffsetSnapshot()
         }
-      }, [activePages, clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot])
+      }, [activePages, clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot, visibleMessages.length])
 
       useLayoutEffect(() => {
         const anchor = pendingLayoutAnchorRef.current
@@ -891,7 +903,27 @@ export const ChatArea = memo(
               ),
             )}
 
-            {visibleMessages.length > 0 && isLoadingMore && (
+            {visibleMessages.length > 0 && historyLoadError && (
+              <div className={`w-full ${messageMaxWidthClass} mx-auto ${messagePaddingClass} shrink-0`}>
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-1 text-[length:var(--fs-sm)] text-text-400">{t('chatArea.historyLoadFailed')}</p>
+                    <MessageErrorView error={historyLoadError} stateKey={`history:${sessionId ?? 'unknown'}:error`} />
+                  </div>
+                  {onLoadMore && (
+                    <button
+                      type="button"
+                      onClick={() => void onLoadMore()}
+                      className="shrink-0 rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
+                    >
+                      {t('common:retry')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {visibleMessages.length > 0 && (isLoadingMore || isLoadingHistory) && (
               <div className="flex justify-center py-3 shrink-0">
                 <div className="flex items-center gap-2 text-text-400 text-[length:var(--fs-sm)]">
                   <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
