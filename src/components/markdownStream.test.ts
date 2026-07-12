@@ -159,6 +159,22 @@ $$`)
     expect(blocks[0].src).toBe(markdown)
   })
 
+  it('keeps adjacent style, markup, and script HTML in one artifact block', () => {
+    const markdown = `<style>
+.apple-clock { color: red; }
+</style>
+
+<div class="apple-clock">12:00</div>
+
+<script>document.querySelector('.apple-clock').dataset.ready = 'true'</script>`
+
+    for (const isStreaming of [true, false]) {
+      const blocks = splitMarkdownStream(markdown, isStreaming)
+      expect(blocks).toHaveLength(1)
+      expect(blocks[0].src).toBe(markdown)
+    }
+  })
+
   it('keeps an HTML fence key stable when the stream closes', () => {
     const open = splitMarkdownStream('```html\n<div>live</div>', true)
     const complete = splitMarkdownStream('```html\n<div>live</div>\n```', true)

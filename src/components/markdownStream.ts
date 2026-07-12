@@ -113,6 +113,32 @@ function updateHtmlContainerStack(raw: string, stack: string[]) {
   }
 }
 
+function mergeHtmlArtifactBlocks(blocks: MarkdownSourceBlock[]): MarkdownSourceBlock[] {
+  const merged: MarkdownSourceBlock[] = []
+
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]
+    if (block.token?.type !== 'html') {
+      merged.push(block)
+      continue
+    }
+
+    const run = [block]
+    while (blocks[index + 1]?.token?.type === 'html') {
+      run.push(blocks[index + 1])
+      index += 1
+    }
+    const raw = run.map(item => item.raw).join('')
+    if (run.length > 1 && /<(?:style|script)\b/i.test(raw)) {
+      merged.push({ ...block, raw, src: raw, token: undefined })
+    } else {
+      merged.push(...run)
+    }
+  }
+
+  return merged
+}
+
 function mergeMixedHtmlBlocks(blocks: MarkdownSourceBlock[]): MarkdownSourceBlock[] {
   const merged: MarkdownSourceBlock[] = []
   const stack: string[] = []
@@ -188,7 +214,9 @@ function splitMarkdownBlocks(markdown: string) {
   }
 
   return {
-    blocks: mergeMixedHtmlBlocks(blocks.length > 0 ? blocks : [{ start: 0, raw: markdown, src: markdown }]),
+    blocks: mergeMixedHtmlBlocks(
+      mergeHtmlArtifactBlocks(blocks.length > 0 ? blocks : [{ start: 0, raw: markdown, src: markdown }]),
+    ),
     referenceDefinitions: referenceDefinitions.join('\n'),
   }
 }

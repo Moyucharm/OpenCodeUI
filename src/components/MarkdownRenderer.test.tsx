@@ -695,6 +695,27 @@ $$`
     expect(container.querySelector('.ripple-field')).not.toBeInTheDocument()
   })
 
+  it('sandboxes adjacent bare style, markup, and script as one HTML artifact', () => {
+    const content = `<style>
+.apple-clock { color: red; }
+</style>
+
+<div class="apple-clock">12:00</div>
+
+<script>document.querySelector('.apple-clock').dataset.ready = 'true'</script>`
+    render(<MarkdownRenderer content={content} />)
+
+    const frame = screen.getByTitle('HTML preview')
+    const srcDoc = frame.getAttribute('srcdoc') ?? ''
+    expect(srcDoc).toContain('.apple-clock { color: red; }')
+    expect(srcDoc).toContain('<div class="apple-clock">12:00</div>')
+    expect(srcDoc).toContain("dataset.ready = 'true'")
+
+    fireEvent.click(screen.getByRole('button', { name: 'View HTML source' }))
+    expect(screen.getByTestId('code-block')).toHaveTextContent('.apple-clock { color: red; }')
+    expect(screen.getByTestId('code-block')).toHaveTextContent("dataset.ready = 'true'")
+  })
+
   it('runs complete HTML code fences only inside an isolated sandbox preview', () => {
     render(<MarkdownRenderer content={'```html\n<button onclick="document.body.dataset.clicked=1">Run</button><script>document.title="artifact"</script>\n```'} />)
 
