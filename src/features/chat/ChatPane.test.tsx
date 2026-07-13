@@ -3,10 +3,16 @@ import { render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatPane } from './ChatPane'
 
-const { chatAreaProps, retrySessionLoadMock } = vi.hoisted(() => ({
-  chatAreaProps: { current: null as Record<string, unknown> | null },
-  retrySessionLoadMock: vi.fn(),
-}))
+const chatAreaProps = { current: null as Record<string, unknown> | null }
+const retrySessionLoadMock = vi.fn()
+const restoreAgentFromMessageMock = vi.fn()
+const chatSessionInputs = {
+  messages: [] as unknown[],
+  agents: [] as unknown[],
+  selectedAgent: '',
+  commandSessionId: null as string | null,
+  routeSessionId: 'session-1',
+}
 
 vi.mock('react-i18next', () => ({
   Trans: ({ children }: { children: unknown }) => children,
@@ -49,17 +55,18 @@ vi.mock('./useChatPageViewModel', () => ({
 }))
 vi.mock('../../hooks', () => ({
   useChatSession: () => ({
-    messages: [],
+    messages: chatSessionInputs.messages,
     isStreaming: false,
     canUndo: false,
     canRedo: false,
     redoSteps: 0,
     revertedContent: null,
     restoredContent: null,
-    agents: [],
-    selectedAgent: '',
+    agents: chatSessionInputs.agents,
+    selectedAgent: chatSessionInputs.selectedAgent,
+    commandSessionId: chatSessionInputs.commandSessionId,
     setSelectedAgent: vi.fn(),
-    routeSessionId: 'session-1',
+    routeSessionId: chatSessionInputs.routeSessionId,
     routeStatus: undefined,
     loadState: 'error',
     loadError: undefined,
@@ -93,7 +100,7 @@ vi.mock('../../hooks', () => ({
     handlePreviousSession: vi.fn(),
     handleNextSession: vi.fn(),
     handleCopyLastResponse: vi.fn(),
-    restoreAgentFromMessage: vi.fn(),
+    restoreAgentFromMessage: restoreAgentFromMessageMock,
   }),
   useModels: () => ({ models: [], isLoading: false, refetch: vi.fn() }),
   useModelSelection: () => ({
@@ -106,8 +113,12 @@ vi.mock('../../hooks', () => ({
   }),
 }))
 vi.mock('../../hooks/useServerStore', () => ({ useServerStore: () => ({ activeServer: null, getHealth: vi.fn() }) }))
-vi.mock('../../hooks/useCancelHint', () => ({ useCancelHint: () => ({ showCancelHint: false, handleCancelMessage: vi.fn() }) }))
-vi.mock('../../hooks/useTheme', () => ({ useTheme: () => ({ inlineToolRequests: false, outlineCurrentHighlight: false }) }))
+vi.mock('../../hooks/useCancelHint', () => ({
+  useCancelHint: () => ({ showCancelHint: false, handleCancelMessage: vi.fn() }),
+}))
+vi.mock('../../hooks/useTheme', () => ({
+  useTheme: () => ({ inlineToolRequests: false, outlineCurrentHighlight: false }),
+}))
 vi.mock('../../store', () => ({
   messageStore: { protectSession: vi.fn(), unprotectSession: vi.fn() },
   paneControllerStore: { setController: vi.fn(), removeController: vi.fn() },
@@ -134,6 +145,12 @@ describe('ChatPane history recovery wiring', () => {
   beforeEach(() => {
     chatAreaProps.current = null
     retrySessionLoadMock.mockReset()
+    restoreAgentFromMessageMock.mockReset()
+    chatSessionInputs.messages = []
+    chatSessionInputs.agents = []
+    chatSessionInputs.selectedAgent = ''
+    chatSessionInputs.commandSessionId = null
+    chatSessionInputs.routeSessionId = 'session-1'
   })
 
   it('passes retry and legacy pagination state to ChatArea', () => {
@@ -153,5 +170,111 @@ describe('ChatPane history recovery wiring', () => {
       onRetrySession: retrySessionLoadMock,
       historyPaginationMode: 'legacy',
     })
+  })
+
+  it('does not restore the agent from a command-generated user message', () => {
+    chatSessionInputs.agents = [{ name: 'build', mode: 'primary', hidden: false }]
+    chatSessionInputs.messages = [{ info: { role: 'user', agent: 'build' } }]
+    chatSessionInputs.selectedAgent = 'plan'
+    chatSessionInputs.commandSessionId = 'session-1'
+
+    render(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+
+    expect(restoreAgentFromMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('restores the agent again after leaving and reopening a session', () => {
+    chatSessionInputs.agents = [
+      { name: 'plan', mode: 'primary', hidden: false },
+      { name: 'build', mode: 'primary', hidden: false },
+    ]
+    chatSessionInputs.messages = [{ info: { role: 'user', agent: 'plan' } }]
+
+    const { rerender } = render(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+    expect(restoreAgentFromMessageMock).toHaveBeenCalledWith('plan')
+
+    restoreAgentFromMessageMock.mockClear()
+    chatSessionInputs.routeSessionId = 'session-2'
+    chatSessionInputs.messages = []
+    rerender(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-2',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+
+    chatSessionInputs.routeSessionId = 'session-1'
+    chatSessionInputs.messages = [{ info: { role: 'user', agent: 'build' } }]
+    rerender(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+
+    expect(restoreAgentFromMessageMock).toHaveBeenCalledWith('build')
+  })
+
+  it('waits for a user message before marking agent restoration complete', () => {
+    chatSessionInputs.agents = [{ name: 'build', mode: 'primary', hidden: false }]
+    chatSessionInputs.messages = [{ info: { role: 'assistant' } }]
+
+    const { rerender } = render(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+    expect(restoreAgentFromMessageMock).not.toHaveBeenCalled()
+
+    chatSessionInputs.messages = [{ info: { role: 'assistant' } }, { info: { role: 'user', agent: 'build' } }]
+    rerender(
+      createElement(ChatPane, {
+        paneId: 'pane-1',
+        sessionId: 'session-1',
+        isFocused: true,
+        paneCount: 1,
+        displayMode: 'single',
+        navigatePaneToSession: vi.fn(),
+        navigatePaneHome: vi.fn(),
+      }),
+    )
+
+    expect(restoreAgentFromMessageMock).toHaveBeenCalledWith('build')
   })
 })

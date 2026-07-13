@@ -331,6 +331,38 @@ export function useGlobalEvents(directories?: string[]) {
         void requestTaskbarAttention(`permission:${sessionId}`)
       },
     )
+    const completionAttentionStates = new Map<string, number>()
+    const completionGenerations = new Map<string, number>()
+    let completionAttentionVersion = 0
+
+    const getCompletionGeneration = (sessionId: string) => completionGenerations.get(sessionId) ?? 0
+
+    const invalidateCompletion = (sessionId: string) => {
+      completionGenerations.set(sessionId, getCompletionGeneration(sessionId) + 1)
+      completionAttentionStates.delete(sessionId)
+    }
+
+    const requestCompletionTaskbarAttention = (sessionId: string, directory?: string) => {
+      if (completionAttentionStates.has(sessionId)) return
+      const generation = getCompletionGeneration(sessionId)
+      const requestVersion = ++completionAttentionVersion
+      completionAttentionStates.set(sessionId, requestVersion)
+
+      void shouldNotifySessionCompletion(sessionId, directory).then(shouldNotify => {
+        if (
+          disposed ||
+          getCompletionGeneration(sessionId) !== generation ||
+          completionAttentionStates.get(sessionId) !== requestVersion
+        )
+          return
+        if (!shouldNotify) {
+          completionAttentionStates.delete(sessionId)
+          return
+        }
+
+        void requestTaskbarAttention(`completed:${sessionId}`)
+      })
+    }
     const latePendingRequests = new Map<
       string,
       {
@@ -391,7 +423,12 @@ export function useGlobalEvents(directories?: string[]) {
               ? !currentDirectories || currentDirectories.length === 0 || currentDirectories.includes(pending.directory)
               : pending.scopeKey === currentScopeKey
             if (!matchesScope) continue
-            activeSessionStore.addPendingRequest(pending.requestId, pending.sessionId, pending.type, pending.description)
+            activeSessionStore.addPendingRequest(
+              pending.requestId,
+              pending.sessionId,
+              pending.type,
+              pending.description,
+            )
           }
           activeSessionStore.setSessionMetaBulk(sessionMetaEntries)
         })
@@ -432,7 +469,8 @@ export function useGlobalEvents(directories?: string[]) {
     const approveGlobalPendingPermissions = () => {
       if (!autoApproveStore.approvePendingOnFullAuto || autoApproveStore.fullAutoMode !== 'global') return
 
-      const directoriesToFetch = directoriesRef.current && directoriesRef.current.length > 0 ? directoriesRef.current : [undefined]
+      const directoriesToFetch =
+        directoriesRef.current && directoriesRef.current.length > 0 ? directoriesRef.current : [undefined]
 
       void Promise.all(
         directoriesToFetch.map(async directory => {
@@ -459,6 +497,9 @@ export function useGlobalEvents(directories?: string[]) {
     const unsubscribeServerChange = serverStore.onServerChange(serverId => {
       permissionNotificationAggregator.clear()
       latePendingRequests.clear()
+      completionAttentionStates.clear()
+      completionGenerations.clear()
+      completionAttentionVersion++
       void serverStore.checkHealth(serverId).catch(() => {})
     })
 
@@ -518,9 +559,7 @@ export function useGlobalEvents(directories?: string[]) {
       onSessionIdle: data => {
         messageStore.handleSessionIdle(data.sessionID)
         childSessionStore.markIdle(data.sessionID)
-        if (shouldNotifySessionCompletion(data.sessionID)) {
-          void requestTaskbarAttention(`completed:${data.sessionID}`)
-        }
+        requestCompletionTaskbarAttention(data.sessionID, activeSessionStore.getSessionMeta(data.sessionID)?.directory)
         dispatchToConsumers(data.sessionID, cb => cb.onSessionIdle?.(data.sessionID))
       },
 
@@ -566,6 +605,7 @@ export function useGlobalEvents(directories?: string[]) {
         const removedSessionIds = childSessionStore.getSessionAndDescendants(sessionId)
         const removedSessionIdSet = new Set(removedSessionIds)
         for (const id of removedSessionIds) permissionNotificationAggregator.cancelSession(id)
+        for (const id of removedSessionIds) invalidateCompletion(id)
         for (const [requestId, pending] of latePendingRequests) {
           if (removedSessionIdSet.has(pending.sessionId)) latePendingRequests.delete(requestId)
         }
@@ -705,23 +745,26 @@ export function useGlobalEvents(directories?: string[]) {
 
         activeSessionStore.updateStatus(data.sessionID, data.status)
 
-        // Toast — session 从 busy/retry 变成 idle 时弹 completed 通知
-        if (wasBusy && data.status.type === 'idle' && shouldNotifySessionCompletion(data.sessionID) && !belongsToCurrentSession(data.sessionID)) {
-          const meta = activeSessionStore.getSessionMeta(data.sessionID)
-          const sessionLabel = meta?.title || data.sessionID.slice(0, 8)
-          notificationStore.push('completed', sessionLabel, 'Session completed', data.sessionID, meta?.directory)
-        } else if (
-          wasBusy &&
-          data.status.type === 'idle' &&
-          shouldNotifySessionCompletion(data.sessionID) &&
-          isSessionDirectlyOpen(data.sessionID) &&
-          soundStore.getSnapshot().currentSessionEnabled
-        ) {
-          playNotificationSoundDeduped('completed')
+        if (data.status.type === 'busy' || data.status.type === 'retry') {
+          invalidateCompletion(data.sessionID)
         }
 
-        if (wasBusy && data.status.type === 'idle' && shouldNotifySessionCompletion(data.sessionID)) {
-          void requestTaskbarAttention(`completed:${data.sessionID}`)
+        // Toast — session 从 busy/retry 变成 idle 时弹 completed 通知
+        if (wasBusy && data.status.type === 'idle') {
+          const meta = activeSessionStore.getSessionMeta(data.sessionID)
+          const generation = getCompletionGeneration(data.sessionID)
+          void shouldNotifySessionCompletion(data.sessionID, meta?.directory).then(shouldNotify => {
+            if (disposed || getCompletionGeneration(data.sessionID) !== generation || !shouldNotify) return
+
+            if (!belongsToCurrentSession(data.sessionID)) {
+              const sessionLabel = meta?.title || data.sessionID.slice(0, 8)
+              notificationStore.push('completed', sessionLabel, 'Session completed', data.sessionID, meta?.directory)
+            } else if (isSessionDirectlyOpen(data.sessionID) && soundStore.getSnapshot().currentSessionEnabled) {
+              playNotificationSoundDeduped('completed')
+            }
+          })
+
+          requestCompletionTaskbarAttention(data.sessionID, meta?.directory)
         }
       },
 

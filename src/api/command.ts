@@ -16,6 +16,12 @@ export interface Command {
 
 type ApiCommand = Omit<Command, 'source'>
 
+export interface ExecuteCommandOptions {
+  agent?: string
+  model?: string
+  variant?: string
+}
+
 // Frontend-added slash commands that do not come from GET /command.
 // These are executed locally or via dedicated session actions.
 function getFrontendCommands(): Command[] {
@@ -83,6 +89,7 @@ export async function executeCommand(
   command: string,
   args: string = '',
   directory?: string,
+  options?: ExecuteCommandOptions,
 ): Promise<unknown> {
   const sdk = getSDKClient()
   return unwrap(
@@ -91,6 +98,7 @@ export async function executeCommand(
       directory: formatPathForApi(directory),
       command,
       arguments: args,
+      ...options,
     }),
   )
 }

@@ -44,9 +44,14 @@ const {
   claimAutoReplyMock: vi.fn((_requestId: string) => true),
   releaseAutoReplyMock: vi.fn((_requestId: string) => undefined),
   useSessionFamilyMock: vi.fn((_sessionId: string | null) => [] as string[]),
-  pendingPermissionRequestsMock: [] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>,
-  handlePermissionReplyMock: vi.fn(
-    (_requestId: string, _reply: string, _directory?: string, _sessionId?: string) => Promise.resolve(true),
+  pendingPermissionRequestsMock: [] as Array<{
+    id: string
+    sessionID: string
+    permission: string
+    patterns?: string[]
+  }>,
+  handlePermissionReplyMock: vi.fn((_requestId: string, _reply: string, _directory?: string, _sessionId?: string) =>
+    Promise.resolve(true),
   ),
   refreshPendingRequestsMock: vi.fn((_sessionIds?: string | string[], _directory?: string) => Promise.resolve()),
   setPendingPermissionRequestsMock: vi.fn(),
@@ -277,6 +282,7 @@ describe('useChatSession handleCommand', () => {
         paneId: 'pane-1',
         chatAreaRef: { current: null },
         currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        currentVariant: 'high',
         refetchModels: vi.fn(async () => {}),
         sessionId: 'session-1',
         navigateToSession: vi.fn(),
@@ -296,7 +302,11 @@ describe('useChatSession handleCommand', () => {
       await Promise.resolve()
     })
 
-    expect(executeCommandMock).toHaveBeenCalledWith('session-1', 'review', 'src/App.tsx', '/workspace/demo')
+    expect(executeCommandMock).toHaveBeenCalledWith('session-1', 'review', 'src/App.tsx', '/workspace/demo', {
+      agent: 'build',
+      model: 'provider-1/model-1',
+      variant: 'high',
+    })
     expect(settled).toBe(true)
     expect(commandResult).toBe(true)
   })

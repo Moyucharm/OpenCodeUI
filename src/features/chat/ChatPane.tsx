@@ -255,6 +255,7 @@ export const ChatPane = memo(function ChatPane({
     restoredContent,
     agents,
     selectedAgent,
+    commandSessionId,
     setSelectedAgent,
     routeSessionId,
     routeStatus,
@@ -299,6 +300,7 @@ export const ChatPane = memo(function ChatPane({
     paneId,
     chatAreaRef,
     currentModel,
+    currentVariant: selectedVariant,
     refetchModels,
     sessionId,
     navigateToSession,
@@ -340,7 +342,10 @@ export const ChatPane = memo(function ChatPane({
         : '',
     ].filter(Boolean)
 
-    const responseBody = [lines.join('\n'), activeServerHealth.details ? `Raw diagnostics:\n${activeServerHealth.details}` : '']
+    const responseBody = [
+      lines.join('\n'),
+      activeServerHealth.details ? `Raw diagnostics:\n${activeServerHealth.details}` : '',
+    ]
       .filter(Boolean)
       .join('\n\n')
 
@@ -483,17 +488,38 @@ export const ChatPane = memo(function ChatPane({
   // ============================================
   // Agent Restoration Effect
   // ============================================
+  const restoredAgentSessionRef = useRef<string | null>(null)
   useEffect(() => {
     if (inputRestoreContent?.agent) {
       restoreAgentFromMessage(inputRestoreContent.agent)
       return
     }
-    if (messages.length === 0) return
-    const lastUserMsg = [...messages].reverse().find(m => m.info.role === 'user')
-    if (lastUserMsg && 'agent' in lastUserMsg.info) {
-      restoreAgentFromMessage((lastUserMsg.info as { agent?: string }).agent)
+    if (restoredAgentSessionRef.current && restoredAgentSessionRef.current !== routeSessionId) {
+      restoredAgentSessionRef.current = null
     }
-  }, [inputRestoreContent, messages, restoreAgentFromMessage])
+    if (
+      !routeSessionId ||
+      commandSessionId === routeSessionId ||
+      restoredAgentSessionRef.current === routeSessionId ||
+      messages.length === 0
+    )
+      return
+
+    const lastUserMsg = [...messages].reverse().find(m => m.info.role === 'user')
+    if (!lastUserMsg) return
+
+    const agentName = 'agent' in lastUserMsg.info ? (lastUserMsg.info as { agent?: string }).agent : undefined
+    if (!agentName) {
+      restoredAgentSessionRef.current = routeSessionId
+      return
+    }
+
+    // Wait for the agent list before marking this session as restored.
+    if (!agents.some(agent => agent.name === agentName && agent.mode !== 'subagent' && !agent.hidden)) return
+
+    restoredAgentSessionRef.current = routeSessionId
+    restoreAgentFromMessage(agentName)
+  }, [inputRestoreContent, routeSessionId, commandSessionId, messages, agents, restoreAgentFromMessage])
 
   // ============================================
   // Focus handling
@@ -782,7 +808,7 @@ export const ChatPane = memo(function ChatPane({
         text: inputRestoreContent.text,
         attachments: inputRestoreContent.attachments as Attachment[],
       }
-      : undefined
+    : undefined
 
   const workingStatus = useMemo(
     () =>
@@ -872,18 +898,18 @@ export const ChatPane = memo(function ChatPane({
           <div className="absolute bottom-full inset-x-0 flex justify-center pb-2 pointer-events-none z-20">
             {showCancelHint || (fullAutoHint && !showCancelHint) ? (
               <div className="px-3 py-1.5 glass border border-border-200/60 rounded-lg shadow-lg text-[length:var(--fs-sm)] text-text-300 animate-in fade-in slide-in-from-bottom-2 duration-150">
-              {showCancelHint ? (
-                <Trans
-                  i18nKey="chat:hints.pressEscAgain"
-                  components={{
-                    1: (
-                      <kbd className="mx-0.5 px-1.5 py-0.5 bg-bg-200 border border-border-200 rounded text-[length:var(--fs-xs)] font-mono font-medium text-text-200" />
-                    ),
-                  }}
-                />
-              ) : (
-                fullAutoHint
-              )}
+                {showCancelHint ? (
+                  <Trans
+                    i18nKey="chat:hints.pressEscAgain"
+                    components={{
+                      1: (
+                        <kbd className="mx-0.5 px-1.5 py-0.5 bg-bg-200 border border-border-200 rounded text-[length:var(--fs-xs)] font-mono font-medium text-text-200" />
+                      ),
+                    }}
+                  />
+                ) : (
+                  fullAutoHint
+                )}
               </div>
             ) : workingStatus ? (
               <div className="w-full max-w-2xl px-4 animate-in fade-in slide-in-from-bottom-2 duration-150">

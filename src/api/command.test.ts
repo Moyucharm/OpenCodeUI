@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCommands } from './command'
+import { executeCommand, getCommands } from './command'
 
 const listMock = vi.fn()
+const sessionCommandMock = vi.fn()
 
 vi.mock('./sdk', () => ({
   getSDKClient: () => ({
     command: {
       list: (...args: unknown[]) => listMock(...args),
+    },
+    session: {
+      command: (...args: unknown[]) => sessionCommandMock(...args),
     },
   }),
   unwrap: (result: { data?: unknown }) => result.data,
@@ -21,6 +25,7 @@ vi.mock('../store/serverStore', () => ({
 describe('getCommands', () => {
   beforeEach(() => {
     listMock.mockReset()
+    sessionCommandMock.mockReset()
   })
 
   it('marks frontend and api commands with stable sources', async () => {
@@ -44,5 +49,25 @@ describe('getCommands', () => {
       { name: 'compact', description: 'Native compact command', source: 'api' },
       { name: 'new', description: 'Create a new chat session', source: 'frontend' },
     ])
+  })
+
+  it('passes agent, model and variant to session commands', async () => {
+    sessionCommandMock.mockResolvedValue({ data: { ok: true } })
+
+    await executeCommand('session-1', 'review', 'src/App.tsx', '/workspace/project', {
+      agent: 'plan',
+      model: 'provider-1/model-1',
+      variant: 'high',
+    })
+
+    expect(sessionCommandMock).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      directory: '/workspace/project',
+      command: 'review',
+      arguments: 'src/App.tsx',
+      agent: 'plan',
+      model: 'provider-1/model-1',
+      variant: 'high',
+    })
   })
 })

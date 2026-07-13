@@ -13,6 +13,7 @@ function createDeferred<T>() {
 const {
   subscribeToEventsMock,
   getSessionStatusMock,
+  getSessionMock,
   getPendingPermissionsMock,
   getPendingQuestionsMock,
   replyPermissionMock,
@@ -42,7 +43,12 @@ const {
 
   return {
     subscribeToEventsMock: vi.fn(),
-    getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() => Promise.resolve({})),
+    getSessionStatusMock: vi.fn<(directory?: string) => Promise<Record<string, { type: string }>>>(() =>
+      Promise.resolve({}),
+    ),
+    getSessionMock: vi.fn<(_sessionId: string, _directory?: string) => Promise<{ id: string; parentID?: string }>>(() =>
+      Promise.resolve({ id: 'main-session' }),
+    ),
     getPendingPermissionsMock: vi.fn(() =>
       Promise.resolve([] as Array<{ id: string; sessionID: string; permission: string; patterns?: string[] }>),
     ),
@@ -99,6 +105,10 @@ vi.mock('../api', () => ({
   getSessionStatus: getSessionStatusMock,
   getPendingPermissions: getPendingPermissionsMock,
   getPendingQuestions: getPendingQuestionsMock,
+}))
+
+vi.mock('../api/session', () => ({
+  getSession: (sessionId: string, directory?: string) => getSessionMock(sessionId, directory),
 }))
 
 vi.mock('../api/permission', () => ({
@@ -190,6 +200,7 @@ describe('useGlobalEvents', () => {
   beforeEach(() => {
     subscribeToEventsMock.mockReset()
     getSessionStatusMock.mockClear()
+    getSessionMock.mockReset()
     getPendingPermissionsMock.mockClear()
     getPendingQuestionsMock.mockClear()
     replyPermissionMock.mockClear()
@@ -231,6 +242,7 @@ describe('useGlobalEvents', () => {
     checkHealthMock.mockResolvedValue({ status: 'online' })
     onServerChangeMock.mockReturnValue(vi.fn())
     getSessionAndDescendantsMock.mockImplementation((sessionId: string) => [sessionId])
+    getSessionMock.mockResolvedValue({ id: 'main-session' })
     autoApproveStoreMock.subscribe.mockReturnValue(vi.fn())
     autoApproveStoreMock.getPaneFullAutoMode.mockReturnValue('off')
     autoApproveStoreMock.claimAutoReply.mockReturnValue(true)
@@ -410,6 +422,7 @@ describe('useGlobalEvents', () => {
       callbacks = cb
       return vi.fn()
     })
+    getSessionMock.mockResolvedValue({ id: 'main-session' })
     getSessionStatusMock.mockImplementation(() => statusDeferred.promise)
     getPendingPermissionsMock.mockResolvedValue([])
     getPendingQuestionsMock.mockResolvedValue([])
@@ -917,18 +930,18 @@ describe('useGlobalEvents', () => {
 
     renderHook(() => useGlobalEvents())
 
-      await waitFor(() => expect(callbacks).toBeDefined())
-      vi.useFakeTimers()
+    await waitFor(() => expect(callbacks).toBeDefined())
+    vi.useFakeTimers()
 
-      callbacks!.onPermissionAsked?.({
-        id: 'perm-other-pane',
-        sessionID: 'other-session',
-        permission: 'bash',
-        patterns: [],
-      })
-      act(() => {
-        vi.advanceTimersByTime(500)
-      })
+    callbacks!.onPermissionAsked?.({
+      id: 'perm-other-pane',
+      sessionID: 'other-session',
+      permission: 'bash',
+      patterns: [],
+    })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
 
     expect(notificationPushMock).not.toHaveBeenCalled()
     expect(playNotificationSoundMock).toHaveBeenCalledWith('permission')
@@ -958,7 +971,7 @@ describe('useGlobalEvents', () => {
     expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
   })
 
-  it('keeps unknown completion reminders fail-open while child completion reminders are disabled', async () => {
+  it('suppresses unknown completion reminders when the session cannot be resolved', async () => {
     let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
     subscribeToEventsMock.mockImplementation(cb => {
       callbacks = cb
@@ -966,6 +979,7 @@ describe('useGlobalEvents', () => {
     })
     activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'unknown-session': { type: 'busy' } } })
     getChildSessionInfoMock.mockReturnValue(undefined)
+    getSessionMock.mockRejectedValue(new Error('offline'))
     isChildSessionCompletionEnabledMock.mockReturnValue(false)
 
     renderHook(() => useGlobalEvents())
@@ -974,8 +988,9 @@ describe('useGlobalEvents', () => {
 
     callbacks!.onSessionStatus?.({ sessionID: 'unknown-session', status: { type: 'idle' } } as never)
 
-    expect(notificationPushMock).toHaveBeenCalledTimes(1)
-    expect(requestTaskbarAttentionMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith('unknown-session', '/workspace'))
+    expect(notificationPushMock).not.toHaveBeenCalled()
+    expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
   })
 
   it('requests taskbar attention when session.idle arrives without a status transition', async () => {
@@ -988,9 +1003,108 @@ describe('useGlobalEvents', () => {
     renderHook(() => useGlobalEvents())
 
     await waitFor(() => expect(callbacks).toBeDefined())
+    getSessionMock.mockResolvedValue({ id: 'main-session' })
     callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
 
-    expect(requestTaskbarAttentionMock).toHaveBeenCalledWith('completed:main-session')
+    await waitFor(() => expect(requestTaskbarAttentionMock).toHaveBeenCalledWith('completed:main-session'))
+  })
+
+  it('resolves session.idle completion with the stored session directory', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    activeSessionStoreMock.getSessionMeta.mockReturnValue({ title: 'Main Session', directory: '/project-a' })
+    getSessionMock.mockResolvedValue({ id: 'main-session' })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith('main-session', '/project-a'))
+  })
+
+  it('retries completion taskbar attention after a failed relationship lookup', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionMock.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValue({ id: 'main-session' })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledTimes(1))
+    expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
+
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+
+    await waitFor(() => expect(requestTaskbarAttentionMock).toHaveBeenCalledWith('completed:main-session'))
+  })
+
+  it('drops stale completion notifications after a session becomes busy again', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const sessionDeferred = createDeferred<{ id: string }>()
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionMock.mockReturnValue(sessionDeferred.promise)
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'main-session': { type: 'busy' } } })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionStatus?.({ sessionID: 'main-session', status: { type: 'idle' } } as never)
+    callbacks!.onSessionStatus?.({ sessionID: 'main-session', status: { type: 'busy' } } as never)
+    sessionDeferred.resolve({ id: 'main-session' })
+    await Promise.resolve()
+
+    expect(notificationPushMock).not.toHaveBeenCalled()
+    expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
+    expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
+  })
+
+  it('drops stale completion taskbar attention after session deletion', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    const sessionDeferred = createDeferred<{ id: string }>()
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionMock.mockReturnValue(sessionDeferred.promise)
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+    callbacks!.onSessionDeleted?.('main-session')
+    sessionDeferred.resolve({ id: 'main-session' })
+    await Promise.resolve()
+
+    expect(requestTaskbarAttentionMock).not.toHaveBeenCalled()
+  })
+
+  it('deduplicates completion taskbar attention from idle and status events', async () => {
+    let callbacks: Parameters<typeof subscribeToEventsMock>[0] | undefined
+    subscribeToEventsMock.mockImplementation(cb => {
+      callbacks = cb
+      return vi.fn()
+    })
+    getSessionMock.mockResolvedValue({ id: 'main-session' })
+    activeSessionStoreMock.getSnapshot.mockReturnValue({ statusMap: { 'main-session': { type: 'busy' } } })
+
+    renderHook(() => useGlobalEvents())
+
+    await waitFor(() => expect(callbacks).toBeDefined())
+    callbacks!.onSessionIdle?.({ sessionID: 'main-session' })
+    callbacks!.onSessionStatus?.({ sessionID: 'main-session', status: { type: 'idle' } } as never)
+
+    await waitFor(() => expect(requestTaskbarAttentionMock).toHaveBeenCalledTimes(1))
   })
 
   it('continues to dispatch known child permission and question requests', async () => {
@@ -1385,7 +1499,11 @@ describe('useGlobalEvents', () => {
         })
       }
 
-      expect(notificationPushMock).toHaveBeenCalledTimes(1)
+      if (trigger === 'onSessionStatus') {
+        await waitFor(() => expect(notificationPushMock).toHaveBeenCalledTimes(1))
+      } else {
+        expect(notificationPushMock).toHaveBeenCalledTimes(1)
+      }
       expect(playNotificationSoundDedupedMock).not.toHaveBeenCalled()
     },
   )

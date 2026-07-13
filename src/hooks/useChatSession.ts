@@ -85,6 +85,7 @@ interface UseChatSessionOptions {
   paneId: string
   chatAreaRef: React.RefObject<ChatAreaHandle | null>
   currentModel: ModelInfo | undefined
+  currentVariant?: string
   refetchModels: () => Promise<void>
   sessionId: string | null
   navigateToSession: (sessionId: string, directory?: string) => void
@@ -102,6 +103,7 @@ export function useChatSession({
   paneId,
   chatAreaRef,
   currentModel,
+  currentVariant,
   refetchModels,
   sessionId: routeSessionId,
   navigateToSession,
@@ -115,6 +117,8 @@ export function useChatSession({
   const [selectedAgent, setSelectedAgentRaw] = useState<string>(
     () => serverStorage.get(`${STORAGE_KEY_SELECTED_AGENT}:${paneId}`) || '',
   )
+  const [commandSessionId, setCommandSessionId] = useState<string | null>(null)
+  const previousRouteSessionIdRef = useRef(routeSessionId)
   const [restoredContent, setRestoredContent] = useState<{ sessionId: string; content: RevertHistoryItem } | null>(null)
 
   const setSelectedAgent = useCallback(
@@ -133,10 +137,27 @@ export function useChatSession({
 
   const routeStatus = routeSessionId ? statusMap[routeSessionId] : undefined
   const routeSessionIdRef = useRef(routeSessionId)
+  const notificationLifecycleRef = useRef(0)
 
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId
   }, [routeSessionId])
+
+  useEffect(() => {
+    const lifecycleRef = notificationLifecycleRef
+    return () => {
+      lifecycleRef.current++
+    }
+  }, [])
+
+  useEffect(() => {
+    if (previousRouteSessionIdRef.current !== routeSessionId) {
+      if (previousRouteSessionIdRef.current === commandSessionId) {
+        setCommandSessionId(null)
+      }
+      previousRouteSessionIdRef.current = routeSessionId
+    }
+  }, [routeSessionId, commandSessionId])
 
   const handleMissingRouteSession = useCallback(
     (missingSessionId: string) => {
@@ -241,6 +262,10 @@ export function useChatSession({
 
   // Effective directory (used in multiple places)
   const effectiveDirectory = sessionDirectory || currentDirectory
+
+  useEffect(() => {
+    notificationLifecycleRef.current++
+  }, [routeSessionId, effectiveDirectory])
 
   const fullAutoMode = useSyncExternalStore(
     cb => autoApproveStore.onFullAutoChange(cb),
@@ -404,7 +429,6 @@ export function useChatSession({
           if (prev.some(r => r.id === request.id)) return prev
           return [...prev, request]
         })
-
       },
       onPermissionReplied: (data: { sessionID: string; requestID: string }) => {
         setPendingPermissionRequests(prev =>
@@ -440,12 +464,19 @@ export function useChatSession({
       onSessionIdle: (sessionID: string) => {
         // 页面不在前台时发送浏览器通知
         const title = buildNotificationTitle(sessionID, 'Session completed')
-        if (shouldNotifySessionCompletion(sessionID) && notificationEventSettingsStore.isSystemEnabled('completed')) {
+        const notificationLifecycle = notificationLifecycleRef.current
+        void shouldNotifySessionCompletion(sessionID, effectiveDirectory).then(shouldNotify => {
+          if (
+            notificationLifecycleRef.current !== notificationLifecycle ||
+            !shouldNotify ||
+            !notificationEventSettingsStore.isSystemEnabled('completed')
+          )
+            return
           sendNotification(title, 'Session completed', {
             sessionId: sessionID,
             directory: effectiveDirectory,
           })
-        }
+        })
         // 应用内 toast 已在 useGlobalEvents 中统一处理
       },
       onSessionError: (sessionID: string) => {
@@ -1003,7 +1034,12 @@ export function useChatSession({
 
         // Keep command submission semantics aligned with normal messages:
         // once the command is dispatched, clear the draft immediately.
-        void executeCommand(sessionId, command, args, effectiveDirectory).catch(err => {
+        setCommandSessionId(sessionId)
+        void executeCommand(sessionId, command, args, effectiveDirectory, {
+          agent: selectedAgent || undefined,
+          model: currentModel ? `${currentModel.providerId}/${currentModel.id}` : undefined,
+          variant: currentVariant,
+        }).catch(err => {
           handleError('execute command', err)
         })
 
@@ -1013,7 +1049,17 @@ export function useChatSession({
         return false
       }
     },
-    [routeSessionId, effectiveDirectory, createSession, navigateToSession, currentModel, navigateHome, handleNewChat],
+    [
+      routeSessionId,
+      effectiveDirectory,
+      createSession,
+      navigateToSession,
+      currentModel,
+      currentVariant,
+      selectedAgent,
+      navigateHome,
+      handleNewChat,
+    ],
   )
 
   // Undo with animation
@@ -1143,6 +1189,7 @@ export function useChatSession({
     redoSteps,
     revertedContent,
     restoredContent: activeRestoredContent,
+    commandSessionId,
     loadState,
     loadError,
     hasMoreHistory,
