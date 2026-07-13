@@ -26,6 +26,7 @@ const {
   setPendingQuestionRequestsMock,
   getChildSessionInfoMock,
   isChildSessionCompletionEnabledMock,
+  loadSessionMock,
 } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   summarizeSessionMock: vi.fn(),
@@ -52,6 +53,7 @@ const {
   setPendingQuestionRequestsMock: vi.fn(),
   getChildSessionInfoMock: vi.fn(),
   isChildSessionCompletionEnabledMock: vi.fn(() => false),
+  loadSessionMock: vi.fn(),
 }))
 
 const autoApproveState = vi.hoisted(() => ({
@@ -95,7 +97,7 @@ vi.mock('../store', () => ({
 
 vi.mock('../hooks', () => ({
   useSessionManager: () => ({
-    loadSession: vi.fn(),
+    loadSession: (...args: unknown[]) => loadSessionMock(...args),
     loadMoreHistory: vi.fn(),
     handleUndo: vi.fn(),
     handleRedo: vi.fn(),
@@ -202,6 +204,7 @@ describe('useChatSession handleCommand', () => {
     setPendingQuestionRequestsMock.mockReset()
     getChildSessionInfoMock.mockReset()
     isChildSessionCompletionEnabledMock.mockReset()
+    loadSessionMock.mockReset()
     pendingPermissionRequestsMock.length = 0
 
     registerSessionConsumerMock.mockReturnValue(vi.fn())
@@ -218,6 +221,7 @@ describe('useChatSession handleCommand', () => {
     isSystemEnabledMock.mockImplementation((type: string) => type !== 'permission')
     getChildSessionInfoMock.mockReturnValue(undefined)
     isChildSessionCompletionEnabledMock.mockReturnValue(false)
+    loadSessionMock.mockResolvedValue(undefined)
 
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => window.setTimeout(() => cb(0), 16))
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => {
@@ -433,6 +437,46 @@ describe('useChatSession handleCommand', () => {
 
     expect(setPendingPermissionRequestsMock).toHaveBeenCalledTimes(1)
     expect(sendNotificationMock).not.toHaveBeenCalled()
+  })
+
+  it('retries an empty session load with a forced refresh', async () => {
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: 'session-1',
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.retrySessionLoad()
+    })
+
+    expect(loadSessionMock).toHaveBeenCalledWith('session-1', { force: true })
+  })
+
+  it('does not request a retry when no session is routed', async () => {
+    const { result } = renderHook(() =>
+      useChatSession({
+        paneId: 'pane-1',
+        chatAreaRef: { current: null },
+        currentModel: { id: 'model-1', providerId: 'provider-1', variants: [] } as never,
+        refetchModels: vi.fn(async () => {}),
+        sessionId: null,
+        navigateToSession: vi.fn(),
+        navigateHome: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      await result.current.retrySessionLoad()
+    })
+
+    expect(loadSessionMock).not.toHaveBeenCalled()
   })
 
   it('suppresses completed system notifications for a known child when disabled', async () => {

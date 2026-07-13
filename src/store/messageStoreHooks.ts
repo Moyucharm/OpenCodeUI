@@ -161,6 +161,7 @@ export function useSessionState(sessionId: string | null): SessionStateSnapshot 
       redoSteps: state.revertState?.history.length ?? 0,
       revertedContent: state.revertState?.history?.[0] ?? null,
       hasMoreHistory: state.hasMoreHistory,
+      historyPaginationMode: state.paginationMode,
       isLoadingHistory: state.isLoadingHistory,
       historyLoadError: state.historyLoadError,
       directory: state.directory,

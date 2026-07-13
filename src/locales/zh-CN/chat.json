@@ -13,7 +13,8 @@
   "chatArea": {
     "loadingSession": "加载会话中...",
     "loadingHistory": "加载历史记录...",
-    "historyLoadFailed": "无法加载更早的历史记录"
+    "historyLoadFailed": "无法加载更早的历史记录",
+    "legacyHistoryLoading": "正在以兼容模式加载更早的历史记录..."
   },
   "emptyState": {
     "title": "开始新对话",

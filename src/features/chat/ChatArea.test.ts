@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { createElement, type ComponentProps } from 'react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildChatPages,
   buildExpandedPageSelection,
@@ -18,7 +20,8 @@ import {
 } from './chatPageModel'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
 import { buildChatPageViewModel } from './useChatPageViewModel'
-import { arePageBlockPropsEqual } from './ChatArea'
+import { ChatArea, arePageBlockPropsEqual } from './ChatArea'
+import { ChatViewportProvider, type ChatViewportValue } from './chatViewport'
 import type { Message, MessageError, Part, ToolPart, ReasoningPart } from '../../types/message'
 
 function createUserMessage(id: string, created: number): Message {
@@ -129,6 +132,99 @@ function createPageBlockProps(page = createPage([createAssistantMessage('assista
     onMeasuredHeightChange: () => undefined,
   }
 }
+
+const chatViewportValue = {
+  presentation: { surfaceVariant: 'desktop', isCompact: false },
+  interaction: {
+    mode: 'pointer',
+    touchCapable: false,
+    sidebarBehavior: 'docked',
+    rightPanelBehavior: 'docked',
+    bottomPanelBehavior: 'docked',
+    outlineInteraction: 'pointer',
+    enableCollapsedInputDock: false,
+  },
+  layout: {
+    viewportWidth: 1280,
+    viewportHeight: 800,
+    surfaceWidth: 960,
+    surfaceMinWidth: 380,
+    sidebar: {},
+    rightPanel: {},
+    bottomPanel: { maxHeight: 400 },
+  },
+  actions: { setSidebarRequestedWidth: () => undefined },
+} as unknown as ChatViewportValue
+
+function renderEmptyChatArea(props: Partial<ComponentProps<typeof ChatArea>> = {}) {
+  const chatArea = createElement(ChatArea, { messages: [], ...props })
+  return render(
+    createElement(
+      ChatViewportProvider,
+      { value: chatViewportValue, children: chatArea },
+    ),
+  )
+}
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  )
+})
+
+describe('empty history recovery', () => {
+  it('shows history loading while a pending revert hides the latest page', () => {
+    renderEmptyChatArea({ isLoadingHistory: true })
+
+    expect(screen.getByText('Loading history...')).toBeInTheDocument()
+  })
+
+  it('retries a failed history load even when no messages are visible', () => {
+    const onLoadMore = vi.fn()
+    renderEmptyChatArea({
+      historyLoadError: { name: 'APIError', data: { message: 'Older page timed out', isRetryable: true } },
+      onLoadMore,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(onLoadMore).toHaveBeenCalledOnce()
+  })
+
+  it('retries an initial session load after an empty load error', () => {
+    const onRetrySession = vi.fn()
+    renderEmptyChatArea({
+      loadError: { name: 'APIError', data: { message: 'Initial page timed out', isRetryable: true } },
+      onRetrySession,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    expect(onRetrySession).toHaveBeenCalledOnce()
+  })
+
+  it('shows a compatibility hint while legacy history is loading', () => {
+    renderEmptyChatArea({
+      isLoadingHistory: true,
+      historyPaginationMode: 'legacy',
+    } as never)
+
+    expect(screen.getByText('Loading older history in compatibility mode...')).toBeInTheDocument()
+  })
+
+  it('does not show a compatibility hint for cursor pagination', () => {
+    renderEmptyChatArea({
+      isLoadingHistory: true,
+      historyPaginationMode: 'cursor',
+    } as never)
+
+    expect(screen.queryByText('Loading older history in compatibility mode...')).not.toBeInTheDocument()
+  })
+})
 
 describe('buildVisibleMessageEntries', () => {
   it('keeps source ids for merged assistant tool messages', () => {

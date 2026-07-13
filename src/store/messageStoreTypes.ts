@@ -48,6 +48,8 @@ export interface SessionState {
   historyGeneration: number
   /** 尚未加载到内存的服务端撤销点 */
   pendingRevertState?: ApiSession['revert']
+  /** 本地撤销状态的单调世代，用于拒绝过期的 session 元数据 */
+  localRevertGeneration: number
   /** session 目录 */
   directory: string
   /** session 标题 */
@@ -91,6 +93,7 @@ export interface SessionStateSnapshot {
   redoSteps: number
   revertedContent: RevertHistoryItem | null
   hasMoreHistory: boolean
+  historyPaginationMode: HistoryPaginationMode
   isLoadingHistory: boolean
   historyLoadError?: MessageError
   directory: string

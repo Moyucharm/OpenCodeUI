@@ -215,6 +215,95 @@ describe('useSessionManager', () => {
     })
   })
 
+  it('continues loading cursor pages until the pending revert target arrives', async () => {
+    const latest = createMessage('latest', 3)
+    const middle = createMessage('middle', 2)
+    const revertTarget = createMessage('revert-target', 1)
+    let state = {
+      messages: [] as ReturnType<typeof createMessage>[],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'idle' as const,
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined as string | undefined,
+      paginationMode: 'unknown' as 'unknown' | 'cursor' | 'legacy',
+      pendingRevertState: undefined as { messageID: string } | undefined,
+      revertState: null as { messageId: string } | null,
+      localRevertGeneration: 0,
+      isLoadingHistory: false,
+    }
+    messageStoreMock.getSessionState.mockImplementation(() => state)
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      directory: '/workspace/demo',
+      revert: { messageID: 'revert-target' },
+    })
+    getSessionMessagePageMock
+      .mockResolvedValueOnce({ messages: [latest], nextCursor: 'cursor-1' })
+      .mockResolvedValueOnce({ messages: [middle], nextCursor: 'cursor-2' })
+      .mockResolvedValueOnce({ messages: [revertTarget], nextCursor: undefined })
+    messageStoreMock.setMessages.mockImplementation(
+      (_sessionId: string, messages: ReturnType<typeof createMessage>[], options: {
+        hasMoreHistory: boolean
+        historyCursor: string | undefined
+        paginationMode: 'cursor' | 'legacy'
+        revertState?: { messageID: string } | null
+      }) => {
+        state = {
+          ...state,
+          messages,
+          hasMoreHistory: options.hasMoreHistory,
+          historyCursor: options.historyCursor,
+          paginationMode: options.paginationMode,
+          pendingRevertState: options.revertState ?? undefined,
+        }
+      },
+    )
+    let nextHistoryGeneration = 0
+    messageStoreMock.beginHistoryLoad.mockImplementation(() => {
+      state.isLoadingHistory = true
+      nextHistoryGeneration += 1
+      return nextHistoryGeneration
+    })
+    messageStoreMock.prependMessages.mockImplementation((_sessionId: string, messages: ReturnType<typeof createMessage>[]) => {
+      state.messages = [...messages, ...state.messages]
+      if (messages.some(message => message.info.id === 'revert-target')) {
+        state.pendingRevertState = undefined
+      }
+    })
+    messageStoreMock.completeHistoryLoad.mockImplementation(
+      (_sessionId: string, _generation: number, options: {
+        historyCursor: string | undefined
+        paginationMode: 'cursor' | 'legacy'
+        hasMoreHistory: boolean
+      }) => {
+        state.historyCursor = options.historyCursor
+        state.paginationMode = options.paginationMode
+        state.hasMoreHistory = options.hasMoreHistory
+        state.isLoadingHistory = false
+        return true
+      },
+    )
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(getSessionMessagePageMock).toHaveBeenCalledTimes(3)
+    })
+    expect(getSessionMessagePageMock).toHaveBeenLastCalledWith('session-1', {
+      directory: '/workspace/demo',
+      limit: HISTORY_LOAD_BATCH_SIZE,
+      before: 'cursor-2',
+      signal: expect.any(AbortSignal),
+    })
+  })
+
   it('uses the server cursor and a fixed batch size when loading older history', async () => {
     const latest = createMessage('latest', 2)
     const older = createMessage('older', 1)
@@ -582,7 +671,7 @@ describe('useSessionManager', () => {
       resolveSession = resolve
     })
     const messages = [createMessage('message-1', 1)]
-    const state = { messages: [], revertState: null as { messageId: string } | null }
+    const state = { messages: [], revertState: null as { messageId: string } | null, localRevertGeneration: 0 }
     messageStoreMock.getSessionState.mockReturnValue(state)
     getSessionMock.mockReturnValue(sessionPromise)
     getSessionMessagePageMock.mockResolvedValue({ messages, nextCursor: undefined })
@@ -614,7 +703,7 @@ describe('useSessionManager', () => {
     const sessionPromise = new Promise<{ id: string; directory: string; revert: null }>(resolve => {
       resolveSession = resolve
     })
-    const state = { messages: [], revertState: null as { messageId: string } | null }
+    const state = { messages: [], revertState: null as { messageId: string } | null, localRevertGeneration: 0 }
     messageStoreMock.getSessionState.mockReturnValue(state)
     getSessionMock.mockReturnValue(sessionPromise)
     getSessionMessagePageMock.mockResolvedValue({ messages: [createMessage('message-1', 1)], nextCursor: undefined })
@@ -628,6 +717,7 @@ describe('useSessionManager', () => {
 
     await waitFor(() => expect(messageStoreMock.setMessages).toHaveBeenCalled())
     state.revertState = { messageId: 'local-revert' }
+    state.localRevertGeneration = 1
 
     await act(async () => {
       resolveSession({ id: 'session-1', directory: '/workspace/demo', revert: null })
@@ -640,6 +730,123 @@ describe('useSessionManager', () => {
         expect.not.objectContaining({ revertState: null }),
       )
     })
+  })
+
+  it('does not apply old session metadata after a local revert changes during the initial page request', async () => {
+    let resolveSession!: (session: { id: string; directory: string; revert: null }) => void
+    let resolvePage!: (page: { messages: ReturnType<typeof createMessage>[]; nextCursor: undefined }) => void
+    const sessionPromise = new Promise<{ id: string; directory: string; revert: null }>(resolve => {
+      resolveSession = resolve
+    })
+    const pagePromise = new Promise<{ messages: ReturnType<typeof createMessage>[]; nextCursor: undefined }>(resolve => {
+      resolvePage = resolve
+    })
+    const state = {
+      messages: [createMessage('existing', 1)],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: true,
+      historyCursor: 'older-1',
+      paginationMode: 'cursor',
+      revertState: null as { messageId: string } | null,
+      localRevertGeneration: 0,
+    }
+    messageStoreMock.getSessionState.mockReturnValue(state)
+    getSessionMock.mockReturnValue(sessionPromise)
+    getSessionMessagePageMock.mockReturnValue(pagePromise)
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: null,
+        directory: '/workspace/demo',
+      }),
+    )
+    const load = result.current.loadSession('session-1')
+
+    state.revertState = { messageId: 'local-revert' }
+    state.localRevertGeneration = 1
+    resolvePage({ messages: [createMessage('message-1', 1)], nextCursor: undefined })
+    await act(async () => {
+      await load
+    })
+
+    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      'session-1',
+      [createMessage('message-1', 1)],
+      expect.not.objectContaining({ revertState: null }),
+    )
+
+    resolveSession({ id: 'session-1', directory: '/workspace/demo', revert: null })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(messageStoreMock.updateSessionMetadata).not.toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ revertState: null }),
+    )
+  })
+
+  it('keeps an active history load valid while refreshing a loaded streaming session', async () => {
+    const state = {
+      messages: [createMessage('assistant-1', 1)],
+      isStreaming: true,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: true,
+      historyCursor: 'older-1',
+      paginationMode: 'cursor',
+      revertState: null,
+      localRevertGeneration: 0,
+    }
+    messageStoreMock.getSessionState.mockReturnValue(state)
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: null,
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1')
+    })
+
+    expect(messageStoreMock.invalidateHistoryLoad).not.toHaveBeenCalled()
+  })
+
+  it('does not restart an active history load for a force refresh with cached messages', async () => {
+    const state = {
+      messages: [createMessage('assistant-1', 1)],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: true,
+      historyCursor: 'older-1',
+      paginationMode: 'cursor',
+      isLoadingHistory: true,
+      revertState: null,
+      localRevertGeneration: 0,
+    }
+    messageStoreMock.getSessionState.mockReturnValue(state)
+    getSessionMessagePageMock.mockResolvedValue({ messages: [createMessage('assistant-1', 1)], nextCursor: 'older-1' })
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: null,
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.loadSession('session-1', { force: true })
+    })
+
+    expect(messageStoreMock.setLoadState).not.toHaveBeenCalledWith('session-1', 'loading')
   })
 
   it('merges a stale cached reload into previously loaded history without resetting pagination', async () => {

@@ -33,6 +33,27 @@ type Subscriber = () => void
 
 const MAX_CACHED_SESSIONS = 10
 
+function compareMessagesByCreatedAt(a: Message, b: Message): number {
+  const createdDifference = (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0)
+  return createdDifference || a.info.id.localeCompare(b.info.id)
+}
+
+function mergeChronologicalMessages(existing: Message[], additions: Message[]): Message[] {
+  const merged: Message[] = []
+  let existingIndex = 0
+  let additionIndex = 0
+
+  while (existingIndex < existing.length && additionIndex < additions.length) {
+    if (compareMessagesByCreatedAt(existing[existingIndex], additions[additionIndex]) <= 0) {
+      merged.push(existing[existingIndex++])
+    } else {
+      merged.push(additions[additionIndex++])
+    }
+  }
+
+  return [...merged, ...existing.slice(existingIndex), ...additions.slice(additionIndex)]
+}
+
 class MessageStore {
   private sessions = new Map<string, SessionState>()
   private subscribers = new Set<Subscriber>()
@@ -268,6 +289,7 @@ class MessageStore {
         historyLoadError: undefined,
         historyGeneration: 0,
         pendingRevertState: undefined,
+        localRevertGeneration: 0,
         directory: '',
         title: undefined,
         loadError: undefined,
@@ -483,7 +505,15 @@ class MessageStore {
     state.shareUrl = options?.shareUrl
     state.isStale = false
 
-    this.applyApiRevertState(state, options?.revertState ?? null)
+    if (options?.revertState !== undefined) {
+      this.applyApiRevertState(state, options.revertState)
+    } else if (state.pendingRevertState) {
+      this.applyApiRevertState(state, state.pendingRevertState)
+      if (!state.hasMoreHistory && state.pendingRevertState) {
+        state.revertState = null
+        state.pendingRevertState = undefined
+      }
+    }
 
     // Streaming 检测
     const inferStreaming = options?.inferStreaming ?? true
@@ -518,16 +548,24 @@ class MessageStore {
       const existing = existingById.get(uiMessage.info.id)
       return [uiMessage.info.id, options?.preserveStreaming && existing?.isStreaming ? existing : uiMessage] as const
     }))
-    const existingMessages = options?.preserveHistory
-      ? state.messages.filter(message => !snapshotMessages.has(message.info.id))
-      : []
 
-    this.invalidateHistoryLoadState(state)
-    state.messages = [...existingMessages, ...snapshotMessages.values()].sort((a, b) => {
-      const aCreated = a.info.time?.created ?? 0
-      const bCreated = b.info.time?.created ?? 0
-      return aCreated - bCreated
-    })
+    let nextMessages: Message[]
+    if (options?.preserveHistory) {
+      const retainedMessages = state.messages.map(message => {
+        const snapshotMessage = snapshotMessages.get(message.info.id)
+        if (!snapshotMessage) return message
+        snapshotMessages.delete(message.info.id)
+        return snapshotMessage
+      })
+      nextMessages = snapshotMessages.size > 0
+        ? mergeChronologicalMessages(retainedMessages, Array.from(snapshotMessages.values()).sort(compareMessagesByCreatedAt))
+        : retainedMessages
+    } else {
+      nextMessages = Array.from(snapshotMessages.values()).sort(compareMessagesByCreatedAt)
+    }
+
+    if (!options?.preserveHistory) this.invalidateHistoryLoadState(state)
+    state.messages = nextMessages
     state.loadState = 'loaded'
     state.loadError = undefined
     state.isStale = false
@@ -558,6 +596,10 @@ class MessageStore {
       state.messages = [...unique, ...state.messages]
     }
     this.applyApiRevertState(state, state.pendingRevertState)
+    if (!hasMore && state.pendingRevertState) {
+      state.revertState = null
+      state.pendingRevertState = undefined
+    }
     state.hasMoreHistory = hasMore
 
     this.notify([sessionId])
@@ -747,6 +789,7 @@ class MessageStore {
       state.messages = state.messages.slice(0, revertIndex)
     }
     state.revertState = null
+    state.localRevertGeneration += 1
     this.notify([sessionId])
   }
 
@@ -774,6 +817,8 @@ class MessageStore {
           history: snapshot.revertState.history.map(item => ({ ...item, attachments: [...item.attachments] })),
         }
       : null
+    state.pendingRevertState = undefined
+    state.localRevertGeneration += 1
     state.isStreaming = false
     this.notify([sessionId])
   }
@@ -783,6 +828,7 @@ class MessageStore {
     if (!state) return
     state.revertState = revertState
     state.pendingRevertState = undefined
+    state.localRevertGeneration += 1
     this.notify([sessionId])
   }
 

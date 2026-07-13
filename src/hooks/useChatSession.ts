@@ -74,6 +74,7 @@ const EMPTY_SESSION_STATE = {
   redoSteps: 0,
   revertedContent: null,
   hasMoreHistory: false,
+  historyPaginationMode: 'unknown' as const,
   isLoadingHistory: false,
   historyLoadError: undefined,
   directory: '',
@@ -165,6 +166,7 @@ export function useChatSession({
   const redoSteps = perSessionState.redoSteps
   const revertedContent = perSessionState.revertedContent
   const hasMoreHistory = perSessionState.hasMoreHistory
+  const historyPaginationMode = perSessionState.historyPaginationMode
   const isLoadingHistory = perSessionState.isLoadingHistory
   const historyLoadError = perSessionState.historyLoadError
   const loadState = routeSessionId ? perSessionState.loadState : ('idle' as const)
@@ -210,6 +212,11 @@ export function useChatSession({
     directory: currentDirectory,
     onSessionMissing: handleMissingRouteSession,
   })
+
+  const retrySessionLoad = useCallback(() => {
+    if (!routeSessionId) return Promise.resolve()
+    return loadSession(routeSessionId, { force: true })
+  }, [loadSession, routeSessionId])
 
   // Permission handling
   const {
@@ -1139,6 +1146,7 @@ export function useChatSession({
     loadState,
     loadError,
     hasMoreHistory,
+    historyPaginationMode,
     isLoadingHistory,
     historyLoadError,
     retryStatus,
@@ -1161,6 +1169,7 @@ export function useChatSession({
 
     // Session management
     loadMoreHistory,
+    retrySessionLoad,
     handleRedoAll,
     clearRevert: clearRestoredContent,
 

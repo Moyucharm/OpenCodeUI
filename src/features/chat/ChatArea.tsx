@@ -29,6 +29,7 @@ import { MessageErrorView } from '../message/parts'
 import { messageStore } from '../../store'
 import { useTheme } from '../../hooks/useTheme'
 import type { Message, MessageError } from '../../types/message'
+import type { HistoryPaginationMode } from '../../store/messageStoreTypes'
 import { RetryStatusInline, type RetryStatusInlineData } from './RetryStatusInline'
 import { buildVisibleMessageEntries, getVisibleMessageForkTargetId } from './chatAreaVisibility'
 import { AT_BOTTOM_THRESHOLD_PX } from '../../constants'
@@ -110,8 +111,10 @@ interface ChatAreaProps {
   connectionError?: MessageError
   onOpenSettings?: () => void
   hasMoreHistory?: boolean
+  historyPaginationMode?: HistoryPaginationMode
   isLoadingHistory?: boolean
   onLoadMore?: () => void | Promise<void>
+  onRetrySession?: () => void | Promise<void>
   onUndo?: (userMessageId: string) => void
   onFork?: (message: Message, forkMessageId?: string) => void | Promise<void>
   canUndo?: boolean
@@ -148,10 +151,12 @@ export const ChatArea = memo(
         connectionError,
         onOpenSettings,
         onLoadMore,
+        onRetrySession,
         onUndo,
         onFork,
         canUndo,
         hasMoreHistory: _hasMoreHistory = false,
+        historyPaginationMode = 'unknown',
         isLoadingHistory = false,
         registerMessage,
         retryStatus = null,
@@ -529,27 +534,17 @@ export const ChatArea = memo(
         })
       }, [loadState, updateScrollOffsetSnapshot])
 
-      const tryLoadMore = useCallback(() => {
+      const startLoadMore = useCallback((allowRetry = false) => {
         if (isLoadingRef.current) return
-        if (!topSentinelVisibleRef.current) return
-        if (loadMoreBlockedRef.current) return
 
         const fn = loadMoreRef.current
         if (!fn) return
 
         const sid = sessionId
-        if (!sid) return
-        const hasMore = messageStore.getSessionState(sid)?.hasMoreHistory ?? false
-        if (!hasMore) return
-
-        const sinceWheel = Date.now() - lastWheelInputAtRef.current
-        if (sinceWheel < LOAD_MORE_WHEEL_COOLDOWN_MS) {
-          clearPendingLoadMoreTimer()
-          pendingLoadMoreTimerRef.current = window.setTimeout(() => {
-            pendingLoadMoreTimerRef.current = null
-            tryLoadMoreRef.current()
-          }, LOAD_MORE_DEFER_MS)
-          return
+        if (!allowRetry) {
+          if (!sid) return
+          const hasMore = messageStore.getSessionState(sid)?.hasMoreHistory ?? false
+          if (!hasMore) return
         }
 
         const root = scrollRef.current
@@ -568,7 +563,27 @@ export const ChatArea = memo(
           isLoadingRef.current = false
           setIsLoadingMore(false)
         })
-      }, [clearPendingLoadMoreTimer, sessionId, visibleMessages.length])
+      }, [sessionId, visibleMessages.length])
+
+      const tryLoadMore = useCallback(() => {
+        if (!topSentinelVisibleRef.current || loadMoreBlockedRef.current) return
+
+        const sinceWheel = Date.now() - lastWheelInputAtRef.current
+        if (sinceWheel < LOAD_MORE_WHEEL_COOLDOWN_MS) {
+          clearPendingLoadMoreTimer()
+          pendingLoadMoreTimerRef.current = window.setTimeout(() => {
+            pendingLoadMoreTimerRef.current = null
+            tryLoadMoreRef.current()
+          }, LOAD_MORE_DEFER_MS)
+          return
+        }
+
+        startLoadMore()
+      }, [clearPendingLoadMoreTimer, startLoadMore])
+
+      const retryHistoryLoad = useCallback(() => {
+        startLoadMore(true)
+      }, [startLoadMore])
 
       useEffect(() => {
         tryLoadMoreRef.current = tryLoadMore
@@ -868,15 +883,26 @@ export const ChatArea = memo(
                 <div className="flex justify-start">
                   <div className="w-full min-w-0 space-y-2">
                     <MessageErrorView error={loadError ?? connectionError!} />
-                    {connectionError && onOpenSettings && (
-                      <button
-                        type="button"
-                        onClick={onOpenSettings}
-                        className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
-                      >
-                        Open server settings
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {loadError && onRetrySession && (
+                        <button
+                          type="button"
+                          onClick={() => void onRetrySession()}
+                          className="shrink-0 rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
+                        >
+                          {t('common:retry')}
+                        </button>
+                      )}
+                      {connectionError && onOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={onOpenSettings}
+                          className="rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
+                        >
+                          Open server settings
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -903,7 +929,7 @@ export const ChatArea = memo(
               ),
             )}
 
-            {visibleMessages.length > 0 && historyLoadError && (
+            {historyLoadError && (
               <div className={`w-full ${messageMaxWidthClass} mx-auto ${messagePaddingClass} shrink-0`}>
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
@@ -913,7 +939,8 @@ export const ChatArea = memo(
                   {onLoadMore && (
                     <button
                       type="button"
-                      onClick={() => void onLoadMore()}
+                      onClick={retryHistoryLoad}
+                      disabled={isLoadingMore || isLoadingHistory}
                       className="shrink-0 rounded-md border border-border-200 bg-bg-100 px-3 py-1.5 text-[length:var(--fs-sm)] text-text-200 transition-colors hover:bg-bg-200"
                     >
                       {t('common:retry')}
@@ -923,11 +950,16 @@ export const ChatArea = memo(
               </div>
             )}
 
-            {visibleMessages.length > 0 && (isLoadingMore || isLoadingHistory) && (
+            {(isLoadingMore || isLoadingHistory) && (
               <div className="flex justify-center py-3 shrink-0">
-                <div className="flex items-center gap-2 text-text-400 text-[length:var(--fs-sm)]">
-                  <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
-                  {t('chatArea.loadingHistory')}
+                <div className="flex flex-col items-center gap-1 text-text-400 text-[length:var(--fs-sm)]" role="status" aria-live="polite">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 border-2 border-text-400/30 border-t-text-400 rounded-full animate-spin" />
+                    {t('chatArea.loadingHistory')}
+                  </div>
+                  {isLoadingHistory && historyPaginationMode === 'legacy' && (
+                    <span className="text-[length:var(--fs-xs)] text-text-500">{t('chatArea.legacyHistoryLoading')}</span>
+                  )}
                 </div>
               </div>
             )}

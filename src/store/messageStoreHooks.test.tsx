@@ -139,4 +139,15 @@ describe('useSessionState', () => {
       historyLoadError: error,
     })
   })
+
+  it('exposes the history pagination mode for compatibility UI', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 1)], {
+      paginationMode: 'legacy',
+      hasMoreHistory: true,
+    })
+
+    const { result } = renderHook(() => useSessionState('session-1'))
+
+    expect(result.current?.historyPaginationMode).toBe('legacy')
+  })
 })

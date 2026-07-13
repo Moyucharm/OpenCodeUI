@@ -13,7 +13,8 @@
   "chatArea": {
     "loadingSession": "Loading session...",
     "loadingHistory": "Loading history...",
-    "historyLoadFailed": "Couldn't load older history"
+    "historyLoadFailed": "Couldn't load older history",
+    "legacyHistoryLoading": "Loading older history in compatibility mode..."
   },
   "emptyState": {
     "title": "Start a new conversation",

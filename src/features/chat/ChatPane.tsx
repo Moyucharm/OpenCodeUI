@@ -261,6 +261,7 @@ export const ChatPane = memo(function ChatPane({
     loadState,
     loadError,
     hasMoreHistory,
+    historyPaginationMode,
     isLoadingHistory,
     historyLoadError,
     retryStatus,
@@ -274,6 +275,7 @@ export const ChatPane = memo(function ChatPane({
     isReplying,
 
     loadMoreHistory,
+    retrySessionLoad,
     handleRedoAll,
     clearRevert,
 
@@ -838,8 +840,10 @@ export const ChatPane = memo(function ChatPane({
               connectionError={connectionError}
               onOpenSettings={onOpenSettings}
               hasMoreHistory={hasMoreHistory}
+              historyPaginationMode={historyPaginationMode}
               isLoadingHistory={isLoadingHistory}
               onLoadMore={loadMoreHistory}
+              onRetrySession={retrySessionLoad}
               onUndo={handleUndoWithAnimation}
               onFork={handleForkMessage}
               canUndo={canUndo}

@@ -70,11 +70,12 @@ function mergeWithLocalStreamingMessages(
 
   if (localOnly.length === 0) return mergedApiMessages
 
-  return [...mergedApiMessages, ...localOnly].sort((a, b) => {
-    const aCreated = a.info.time?.created ?? 0
-    const bCreated = b.info.time?.created ?? 0
-    return aCreated - bCreated
-  })
+  return [...mergedApiMessages, ...localOnly].sort(compareApiMessagesByCreatedAt)
+}
+
+function compareApiMessagesByCreatedAt(a: ApiMessageWithParts, b: ApiMessageWithParts): number {
+  const createdDifference = (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0)
+  return createdDifference || a.info.id.localeCompare(b.info.id)
 }
 
 type MessagePageOptions = Omit<Parameters<typeof getSessionMessagePage>[1], 'signal'>
@@ -104,6 +105,7 @@ function getInitialMessagePage(sessionId: string, directory?: string) {
 
 export function useSessionManager({ sessionId, directory, onLoadComplete, onError, onSessionMissing }: UseSessionManagerOptions) {
   const loadSessionRef = useRef<(sid: string, options?: { force?: boolean }) => Promise<void>>(async () => {})
+  const loadMoreHistoryRef = useRef<(sid?: string) => Promise<void>>(async () => {})
 
   // 使用 ref 保存 directory，避免依赖变化
   const directoryRef = useRef(directory)
@@ -131,6 +133,8 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       const existingState = messageStore.getSessionState(sid)
       const hasExistingMessages = existingState && existingState.messages.length > 0
       const hasLoadedBaseline = existingState?.loadState === 'loaded' && !existingState?.isStale
+      const refreshesLoadedHistory =
+        !!hasExistingMessages && existingState?.loadState === 'loaded' && (force || existingState.isStale)
 
       // 如果已经有消息且正在 streaming，不能覆盖消息，但仍需加载元数据
       // 仅在「已经完整加载过」时才跳过覆盖；
@@ -138,8 +142,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       // force 模式下也不覆盖正在 streaming 且已加载的消息
       if (hasExistingMessages && existingState.isStreaming && hasLoadedBaseline && !force) {
         // 已有完整基线时只刷新元数据，避免影响流式消息和已加载的历史分页状态。
-        messageStore.invalidateHistoryLoad(sid)
-        const initialRevertState = existingState.revertState
+        const initialLocalRevertGeneration = existingState.localRevertGeneration
         void getSession(sid, dir)
           .then(sessionInfo => {
             if (isStale()) return
@@ -148,7 +151,9 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
               directory: sessionInfo.directory ?? dir ?? '',
               title: sessionInfo.title,
               shareUrl: sessionInfo.share?.url,
-              ...(currentState?.revertState === initialRevertState ? { revertState: sessionInfo.revert ?? null } : {}),
+              ...((currentState?.localRevertGeneration ?? 0) === initialLocalRevertGeneration
+                ? { revertState: sessionInfo.revert ?? null }
+                : {}),
             })
           })
           .catch(() => {
@@ -160,11 +165,19 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         return
       }
 
-      messageStore.setLoadState(sid, 'loading')
+      if (!refreshesLoadedHistory) messageStore.setLoadState(sid, 'loading')
+      const initialLocalRevertGeneration = messageStore.getSessionState(sid)?.localRevertGeneration ?? 0
+      const canApplyInitialRevert = () =>
+        (messageStore.getSessionState(sid)?.localRevertGeneration ?? 0) === initialLocalRevertGeneration
+      const loadPendingRevertHistory = () => {
+        const currentState = messageStore.getSessionState(sid)
+        if (currentState?.pendingRevertState && currentState.hasMoreHistory && !currentState.isLoadingHistory) {
+          void loadMoreHistoryRef.current(sid)
+        }
+      }
 
       try {
         let sessionInfo: Awaited<ReturnType<typeof getSession>> | null = null
-        const loadState = { appliedRevertState: undefined as RevertState | null | undefined }
         const getLoadedSessionInfo = () => sessionInfo
         const sessionInfoPromise = getSession(sid, dir).then(
           info => {
@@ -182,10 +195,11 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             directory: info.directory ?? dir ?? '',
             title: info.title,
             shareUrl: info.share?.url,
-            ...(loadState.appliedRevertState === undefined || currentState?.revertState === loadState.appliedRevertState
+            ...((currentState?.localRevertGeneration ?? 0) === initialLocalRevertGeneration
               ? { revertState: info.revert ?? null }
               : {}),
           })
+          loadPendingRevertHistory()
         })
 
         const { messages: apiMessages, nextCursor } = await getInitialMessagePage(sid, dir)
@@ -194,6 +208,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
 
         const currentState = messageStore.getSessionState(sid)
         const loadedSessionInfo = getLoadedSessionInfo()
+        const serverRevert = loadedSessionInfo && canApplyInitialRevert() ? loadedSessionInfo.revert ?? null : undefined
         const hasCursor = nextCursor !== undefined
         const paginationMode = hasCursor ? 'cursor' : 'legacy'
         const hasMoreHistory = hasCursor || apiMessages.length >= INITIAL_MESSAGE_LIMIT
@@ -203,7 +218,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           messageStore.mergeMessages(sid, apiMessages, {
             preserveHistory: true,
             ...(currentState.isStreaming ? { preserveStreaming: true } : {}),
-            ...(loadedSessionInfo ? { revertState: loadedSessionInfo.revert ?? null } : {}),
+            ...(serverRevert !== undefined ? { revertState: serverRevert } : {}),
           })
           messageStore.updateSessionMetadata(sid, {
             ...(loadedSessionInfo
@@ -224,13 +239,13 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
             hasMoreHistory,
             historyCursor: nextCursor,
             paginationMode,
-            revertState: loadedSessionInfo?.revert ?? null,
+            ...(serverRevert !== undefined ? { revertState: serverRevert } : {}),
             shareUrl: loadedSessionInfo?.share?.url,
             inferStreaming: !!currentState?.isStreaming,
           })
         }
 
-        loadState.appliedRevertState = messageStore.getSessionState(sid)?.revertState ?? null
+        loadPendingRevertHistory()
 
         // force 模式（如 SSE 重连）只静默刷新数据，不触发滚动
         if (!force) {
@@ -258,60 +273,73 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
   // Load More History
   // ============================================
 
-  const loadMoreHistory = useCallback(async () => {
-    if (!sessionId) return
+  const loadMoreHistory = useCallback(async (targetSessionId = sessionId) => {
+    if (!targetSessionId) return
 
-    const state = messageStore.getSessionState(sessionId)
+    const state = messageStore.getSessionState(targetSessionId)
     if (!state || !state.hasMoreHistory) return
 
     const dir = state.directory || directoryRef.current
     const useCursor = state.paginationMode === 'cursor'
-    if (useCursor && !state.historyCursor) return
+    const requestedCursor = useCursor ? state.historyCursor : undefined
+    if (useCursor && !requestedCursor) return
 
     const limit = useCursor
       ? HISTORY_LOAD_BATCH_SIZE
       : Math.max(INITIAL_MESSAGE_LIMIT, state.messages.length) + HISTORY_LOAD_BATCH_SIZE
-    const generation = messageStore.beginHistoryLoad(sessionId)
+    const generation = messageStore.beginHistoryLoad(targetSessionId)
     if (generation === null) return
 
     try {
       const page = useCursor
-        ? await getMessagePageWithTimeout(sessionId, {
+        ? await getMessagePageWithTimeout(targetSessionId, {
             directory: dir,
             limit,
-            before: state.historyCursor,
+            before: requestedCursor,
           })
-        : await getMessagePageWithTimeout(sessionId, {
+        : await getMessagePageWithTimeout(targetSessionId, {
             directory: dir,
             limit,
           })
 
-      if (!messageStore.isCurrentHistoryLoad(sessionId, generation)) return
+      if (!messageStore.isCurrentHistoryLoad(targetSessionId, generation)) return
 
-      const latestState = messageStore.getSessionState(sessionId)
+      const latestState = messageStore.getSessionState(targetSessionId)
       if (!latestState) return
 
       // 去重 + 按时间排序
       const existingIds = new Set(latestState.messages.map(m => m.info.id))
       const prependCandidates = page.messages
         .filter(m => !existingIds.has(m.info.id))
-        .sort((a, b) => (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0))
+        .sort(compareApiMessagesByCreatedAt)
 
       const hasCursor = page.nextCursor !== undefined
       const paginationMode = useCursor || hasCursor ? 'cursor' : 'legacy'
       const hasMore = useCursor ? hasCursor : hasCursor || page.messages.length >= limit
-      messageStore.prependMessages(sessionId, prependCandidates, hasMore)
-      messageStore.completeHistoryLoad(sessionId, generation, {
+      messageStore.prependMessages(targetSessionId, prependCandidates, hasMore)
+      messageStore.completeHistoryLoad(targetSessionId, generation, {
         historyCursor: page.nextCursor,
         paginationMode,
         hasMoreHistory: hasMore,
       })
+      const stateAfterPage = messageStore.getSessionState(targetSessionId)
+      if (
+        stateAfterPage?.pendingRevertState &&
+        stateAfterPage.hasMoreHistory &&
+        (!useCursor || page.nextCursor !== requestedCursor)
+      ) {
+        void loadMoreHistoryRef.current(targetSessionId)
+      }
     } catch (error) {
-      if (!messageStore.isCurrentHistoryLoad(sessionId, generation)) return
+      if (!messageStore.isCurrentHistoryLoad(targetSessionId, generation)) return
       sessionErrorHandler('load more history', error)
-      messageStore.failHistoryLoad(sessionId, generation, toLoadMessageError(error))
+      messageStore.failHistoryLoad(targetSessionId, generation, toLoadMessageError(error))
     }
   }, [sessionId])
+
+  useEffect(() => {
+    loadMoreHistoryRef.current = loadMoreHistory
+  }, [loadMoreHistory])
 
   // ============================================
   // Undo

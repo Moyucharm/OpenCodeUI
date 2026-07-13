@@ -144,6 +144,25 @@ describe('messageStore', () => {
     expect(state?.revertState).toBeNull()
   })
 
+  it('advances the local revert generation when sending consumes a revert', () => {
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one'),
+      createMessageWithParts('message-2', 'two'),
+    ])
+    messageStore.setRevertState('session-1', {
+      messageId: 'message-2',
+      history: [],
+    })
+    const generationBeforeSend = messageStore.getSessionState('session-1')?.localRevertGeneration
+
+    messageStore.truncateAfterRevert('session-1')
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      revertState: null,
+      localRevertGeneration: (generationBeforeSend ?? 0) + 1,
+    })
+  })
+
   it('removes a part from a message', () => {
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello')])
 
@@ -262,7 +281,7 @@ describe('messageStore', () => {
     )
 
     const state = messageStore.getSessionState('session-1')
-    expect(messageStore.isCurrentHistoryLoad('session-1', generation)).toBe(false)
+    expect(messageStore.isCurrentHistoryLoad('session-1', generation)).toBe(true)
     expect(state?.messages).toHaveLength(101)
     expect(state?.messages.map(message => message.info.id)).toEqual([
       ...Array.from({ length: 101 }, (_, index) => `message-${index + 1}`),
@@ -272,6 +291,31 @@ describe('messageStore', () => {
       historyCursor: 'older-page',
       paginationMode: 'cursor',
       hasMoreHistory: true,
+    })
+  })
+
+  it('updates a latest snapshot without re-sorting loaded history', () => {
+    const history = Array.from({ length: 200 }, (_, index) => {
+      const messageNumber = index + 1
+      return createMessageWithParts(`message-${messageNumber}`, `message ${messageNumber}`, 'session-1', messageNumber)
+    })
+    messageStore.setMessages('session-1', history, {
+      historyCursor: 'older-page',
+      paginationMode: 'cursor',
+      hasMoreHistory: true,
+    })
+
+    const sortSpy = vi.spyOn(Array.prototype, 'sort')
+
+    messageStore.mergeMessages(
+      'session-1',
+      [createMessageWithParts('message-200', 'updated latest message', 'session-1', 200)],
+      { preserveHistory: true },
+    )
+
+    expect(sortSpy).not.toHaveBeenCalled()
+    expect(messageStore.getSessionState('session-1')?.messages[199]?.parts[0]).toMatchObject({
+      text: 'updated latest message',
     })
   })
 
@@ -342,6 +386,80 @@ describe('messageStore', () => {
       revertState: { messageId: 'message-1' },
       pendingRevertState: undefined,
     })
+  })
+
+  it('clears a pending server revert after a complete replacement snapshot omits its target', () => {
+    messageStore.setMessages('session-1', [], {
+      hasMoreHistory: true,
+      revertState: { messageID: 'missing-message' },
+    })
+
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one', 'session-1', 1)], {
+      hasMoreHistory: false,
+    })
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      revertState: null,
+      pendingRevertState: undefined,
+      hasMoreHistory: false,
+    })
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual(['message-1'])
+  })
+
+  it('applies a pending server revert when a replacement snapshot contains its target', () => {
+    messageStore.setMessages('session-1', [], {
+      hasMoreHistory: true,
+      revertState: { messageID: 'message-2' },
+    })
+
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one', 'session-1', 1),
+      createMessageWithParts('message-2', 'two', 'session-1', 2),
+    ], {
+      hasMoreHistory: false,
+    })
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      revertState: { messageId: 'message-2' },
+      pendingRevertState: undefined,
+    })
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual(['message-1'])
+  })
+
+  it('keeps messages visible when the final history page does not contain a pending revert target', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-2', 'two', 'session-1', 2)], {
+      hasMoreHistory: true,
+      revertState: { messageID: 'missing-message' },
+    })
+
+    expect(messageStore.getVisibleMessages('session-1')).toEqual([])
+
+    messageStore.prependMessages('session-1', [createMessageWithParts('message-1', 'one', 'session-1', 1)], false)
+
+    expect(messageStore.getSessionState('session-1')).toMatchObject({
+      revertState: null,
+      pendingRevertState: undefined,
+      hasMoreHistory: false,
+    })
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual(['message-1', 'message-2'])
+  })
+
+  it('keeps a local revert when a newer message snapshot has no revert metadata', () => {
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one', 'session-1', 1),
+      createMessageWithParts('message-2', 'two', 'session-1', 2),
+    ])
+    messageStore.setRevertState('session-1', {
+      messageId: 'message-2',
+      history: [],
+    })
+
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one', 'session-1', 1),
+      createMessageWithParts('message-2', 'updated two', 'session-1', 2),
+    ])
+
+    expect(messageStore.getSessionState('session-1')?.revertState?.messageId).toBe('message-2')
   })
 
   it('only records a history error for the current history load', () => {
