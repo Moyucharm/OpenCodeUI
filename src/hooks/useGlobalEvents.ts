@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { messageStore, childSessionStore, paneLayoutStore, serverStore } from '../store'
 import { activeSessionStore } from '../store/activeSessionStore'
+import { runtimeActivityStore } from '../store/runtimeActivityStore'
 import { notificationStore } from '../store/notificationStore'
 import { notificationEventSettingsStore } from '../store/notificationEventSettingsStore'
 import { soundStore } from '../store/soundStore'
@@ -562,6 +563,7 @@ export function useGlobalEvents(directories?: string[]) {
 
       onSessionIdle: data => {
         messageStore.handleSessionIdle(data.sessionID)
+        runtimeActivityStore.clearSession(data.sessionID)
         childSessionStore.markIdle(data.sessionID)
         requestCompletionTaskbarAttention(data.sessionID, activeSessionStore.getSessionMeta(data.sessionID)?.directory)
         dispatchToConsumers(data.sessionID, cb => cb.onSessionIdle?.(data.sessionID))
@@ -576,6 +578,7 @@ export function useGlobalEvents(directories?: string[]) {
           return // Don't handle errors with no sessionID
         }
         messageStore.handleSessionError(error.sessionID)
+        runtimeActivityStore.clearSession(error.sessionID)
         childSessionStore.markError(error.sessionID)
         if (!isAbort) {
           // 从 Working 列表移除
@@ -770,6 +773,30 @@ export function useGlobalEvents(directories?: string[]) {
 
           requestCompletionTaskbarAttention(data.sessionID, meta?.directory)
         }
+      },
+
+      onSessionNextToolInputStarted: data => {
+        runtimeActivityStore.setToolInput(data.sessionID, data.callID, data.name)
+      },
+
+      onSessionNextToolCalled: data => {
+        runtimeActivityStore.clearToolInput(data.sessionID, data.callID)
+      },
+
+      onSessionNextToolSuccess: data => {
+        runtimeActivityStore.clearToolInput(data.sessionID, data.callID)
+      },
+
+      onSessionNextToolFailed: data => {
+        runtimeActivityStore.clearToolInput(data.sessionID, data.callID)
+      },
+
+      onSessionNextCompactionStarted: data => {
+        runtimeActivityStore.setCompaction(data.sessionID)
+      },
+
+      onSessionNextCompactionEnded: data => {
+        runtimeActivityStore.clearCompaction(data.sessionID)
       },
 
       // ============================================

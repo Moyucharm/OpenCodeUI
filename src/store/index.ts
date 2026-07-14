@@ -88,6 +88,8 @@ export type {
 
 export { followupQueueStore, useFollowupQueue } from './followupQueueStore'
 export type { QueuedFollowupDraft } from './followupQueueStore'
+export { runtimeActivityStore, useRuntimeActivity } from './runtimeActivityStore'
+export type { RuntimeActivity } from './runtimeActivityStore'
 
 export {
   updateStore,

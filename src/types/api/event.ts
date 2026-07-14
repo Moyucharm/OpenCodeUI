@@ -93,6 +93,12 @@ export const EventTypes = {
   SESSION_STATUS: 'session.status',
   SESSION_DIFF: 'session.diff',
   SESSION_COMPACTED: 'session.compacted',
+  SESSION_NEXT_TOOL_INPUT_STARTED: 'session.next.tool.input.started',
+  SESSION_NEXT_TOOL_CALLED: 'session.next.tool.called',
+  SESSION_NEXT_TOOL_SUCCESS: 'session.next.tool.success',
+  SESSION_NEXT_TOOL_FAILED: 'session.next.tool.failed',
+  SESSION_NEXT_COMPACTION_STARTED: 'session.next.compaction.started',
+  SESSION_NEXT_COMPACTION_ENDED: 'session.next.compaction.ended',
 
   // Message events
   MESSAGE_UPDATED: 'message.updated',
@@ -178,6 +184,12 @@ export interface EventCallbacks {
   onWorktreeReady?: (data: WorktreeReadyPayload) => void
   onWorktreeFailed?: (data: WorktreeFailedPayload) => void
   onVcsBranchUpdated?: (data: VcsBranchUpdatedPayload) => void
+  onSessionNextToolInputStarted?: (data: { sessionID: string; callID: string; name: string }) => void
+  onSessionNextToolCalled?: (data: { sessionID: string; callID: string }) => void
+  onSessionNextToolSuccess?: (data: { sessionID: string; callID: string }) => void
+  onSessionNextToolFailed?: (data: { sessionID: string; callID: string }) => void
+  onSessionNextCompactionStarted?: (data: { sessionID: string }) => void
+  onSessionNextCompactionEnded?: (data: { sessionID: string }) => void
   onError?: (error: Error) => void
   onReconnected?: (reason: 'network' | 'server-switch') => void
 }

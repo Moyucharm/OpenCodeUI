@@ -2,6 +2,7 @@ import { activeSessionStore } from '../store/activeSessionStore'
 import { childSessionStore } from '../store/childSessionStore'
 import { followupQueueStore } from '../store/followupQueueStore'
 import { messageStore } from '../store/messageStore'
+import { runtimeActivityStore } from '../store/runtimeActivityStore'
 import { todoStore } from '../store/todoStore'
 
 export function clearSessionRuntimeState(sessionId: string) {
@@ -10,6 +11,7 @@ export function clearSessionRuntimeState(sessionId: string) {
   for (const id of sessionIds) {
     messageStore.clearSession(id)
     followupQueueStore.clearSession(id)
+    runtimeActivityStore.clearSession(id)
     todoStore.clearTodos(id)
     activeSessionStore.removeSession(id)
   }

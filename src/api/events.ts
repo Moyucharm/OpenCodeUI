@@ -727,6 +727,24 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
     case EventTypes.SESSION_STATUS:
       callbacks.onSessionStatus?.(payload.properties)
       break
+    case EventTypes.SESSION_NEXT_TOOL_INPUT_STARTED:
+      callbacks.onSessionNextToolInputStarted?.(payload.properties)
+      break
+    case EventTypes.SESSION_NEXT_TOOL_CALLED:
+      callbacks.onSessionNextToolCalled?.(payload.properties)
+      break
+    case EventTypes.SESSION_NEXT_TOOL_SUCCESS:
+      callbacks.onSessionNextToolSuccess?.(payload.properties)
+      break
+    case EventTypes.SESSION_NEXT_TOOL_FAILED:
+      callbacks.onSessionNextToolFailed?.(payload.properties)
+      break
+    case EventTypes.SESSION_NEXT_COMPACTION_STARTED:
+      callbacks.onSessionNextCompactionStarted?.(payload.properties)
+      break
+    case EventTypes.SESSION_NEXT_COMPACTION_ENDED:
+      callbacks.onSessionNextCompactionEnded?.(payload.properties)
+      break
     case EventTypes.PERMISSION_ASKED:
       callbacks.onPermissionAsked?.(payload.properties)
       break

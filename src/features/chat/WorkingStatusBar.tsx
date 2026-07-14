@@ -19,7 +19,7 @@ export const WorkingStatusBar = memo(function WorkingStatusBar({ status }: Worki
       className={`glass relative overflow-hidden rounded-xl border px-3 py-2 shadow-lg ${TONE_CLASS[status.tone]}`}
     >
       <div className="pointer-events-none absolute inset-y-0 left-0 w-1/2 animate-[slideRight_1.8s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-current/10 to-transparent" />
-      <div className="relative flex min-w-0 items-center gap-2.5">
+      <div className="relative flex min-w-0 items-center gap-2.5 [font-family:var(--font-ui-cjk)]">
         <span className="flex h-4 items-center gap-1" aria-hidden="true">
           {[0, 1, 2, 3].map(index => (
             <span
@@ -30,6 +30,9 @@ export const WorkingStatusBar = memo(function WorkingStatusBar({ status }: Worki
           ))}
         </span>
         <span className="shrink-0 text-[length:var(--fs-sm)] font-semibold text-text-100">{status.title}</span>
+        {status.detail && status.separator && (
+          <span className="shrink-0 text-[length:var(--fs-sm)] text-text-400">：</span>
+        )}
         {status.detail && <span className="min-w-0 truncate text-[length:var(--fs-sm)] text-text-300">{status.detail}</span>}
         <span className="ml-auto font-mono text-current animate-pulse" aria-hidden="true">
           ▌

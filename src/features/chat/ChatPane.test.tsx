@@ -123,6 +123,7 @@ vi.mock('../../store', () => ({
   messageStore: { protectSession: vi.fn(), unprotectSession: vi.fn() },
   paneControllerStore: { setController: vi.fn(), removeController: vi.fn() },
   useHiddenModelKeys: () => [],
+  useRuntimeActivity: () => null,
 }))
 vi.mock('../../store/paneLayoutStore', () => ({
   paneLayoutStore: { focusPane: vi.fn(), getFocusedPaneId: vi.fn(), findLeaf: vi.fn(), splitPaneToSide: vi.fn() },

@@ -23,7 +23,7 @@ import { useChatPageViewModel } from './useChatPageViewModel'
 import { SessionNavigationContext } from '../../contexts/SessionNavigationContext'
 import { paneLayoutStore } from '../../store/paneLayoutStore'
 import { autoApproveStore } from '../../store/autoApproveStore'
-import { messageStore, paneControllerStore, useHiddenModelKeys } from '../../store'
+import { messageStore, paneControllerStore, useHiddenModelKeys, useRuntimeActivity } from '../../store'
 import { restoreModelSelection } from '../../utils/sessionHelpers'
 import { findModelByKey, getModelKey } from '../../utils/modelUtils'
 import { useTheme } from '../../hooks/useTheme'
@@ -809,6 +809,7 @@ export const ChatPane = memo(function ChatPane({
         attachments: inputRestoreContent.attachments as Attachment[],
       }
     : undefined
+  const runtimeActivity = useRuntimeActivity(routeSessionId)
 
   const workingStatus = useMemo(
     () =>
@@ -818,8 +819,9 @@ export const ChatPane = memo(function ChatPane({
         routeStatus,
         pendingPermissionRequests,
         pendingQuestionRequests,
+        runtimeActivity,
       }),
-    [isStreaming, messages, pendingPermissionRequests, pendingQuestionRequests, routeStatus],
+    [isStreaming, messages, pendingPermissionRequests, pendingQuestionRequests, routeStatus, runtimeActivity],
   )
   const hasInputStatusBanner = showCancelHint || (fullAutoHint && !showCancelHint) || !!workingStatus
 
