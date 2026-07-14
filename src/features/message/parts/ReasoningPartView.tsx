@@ -10,6 +10,7 @@ import { useUiDisclosureState } from '../../../utils/uiDisclosureState'
 
 // italic 默认不显示前导图标；如果后续要恢复，只改这里。
 const ITALIC_SHOW_LEADING_GLYPH = false
+const REASONING_COLLAPSE_DELAY_MS = 160
 
 interface ReasoningPartViewProps {
   part: ReasoningPart
@@ -56,18 +57,22 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
 
   useEffect(() => {
     let frameId: number | null = null
+    let timerId: number | null = null
 
     if (isPartStreaming && hasContent) {
       frameId = requestAnimationFrame(() => {
         setExpanded(true, { touched: false, respectUser: true })
       })
     } else if (!isPartStreaming) {
-      frameId = requestAnimationFrame(() => {
-        setExpanded(false, { touched: false, respectUser: true })
-      })
+      timerId = window.setTimeout(() => {
+        frameId = requestAnimationFrame(() => {
+          setExpanded(false, { touched: false, respectUser: true })
+        })
+      }, REASONING_COLLAPSE_DELAY_MS)
     }
 
     return () => {
+      if (timerId !== null) window.clearTimeout(timerId)
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
   }, [isPartStreaming, hasContent, setExpanded])

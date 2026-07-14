@@ -307,6 +307,7 @@ export interface Message {
   parts: Part[]
   // UI 状态
   isStreaming?: boolean
+  isLocal?: boolean
 }
 
 // ============================================

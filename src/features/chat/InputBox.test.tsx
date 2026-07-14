@@ -110,6 +110,7 @@ vi.mock('../../hooks', () => ({
 
 vi.mock('../../store/messageStoreHooks', () => ({
   useMessages: () => messagesMock,
+  useMessageStoreSelector: <T,>(selector: (state: { messages: Message[] }) => T) => selector({ messages: messagesMock }),
 }))
 
 vi.mock('../../store/keybindingStore', () => ({
@@ -286,7 +287,7 @@ describe('InputBox slash command selection', () => {
     expect(textarea.value).toBe('hello world')
   })
 
-  it('waits for send acknowledgement before clearing the draft', async () => {
+  it('clears the draft immediately while waiting for send acknowledgement', async () => {
     let resolveSend: ((value: boolean) => void) | null = null
     const onSend = vi.fn(
       () =>
@@ -301,7 +302,7 @@ describe('InputBox slash command selection', () => {
     fireEvent.change(textarea, { target: { value: 'pending send' } })
     fireEvent.click(screen.getByRole('button', { name: 'send' }))
 
-    expect(textarea.value).toBe('pending send')
+    expect(textarea.value).toBe('')
 
     await act(async () => {
       resolveSend?.(true)

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiMessage, ApiMessageWithParts, ApiPart } from '../api/types'
-import type { MessageError } from '../types/message'
+import type { Message, MessageError } from '../types/message'
 import { messageStore } from './messageStore'
 
 function createAssistantMessage(id: string, sessionID = 'session-1', created = 1): ApiMessage {
@@ -53,6 +53,29 @@ function createMessageWithParts(id: string, text: string, sessionID = 'session-1
   }
 }
 
+function createUserMessage(id: string, text: string, sessionID = 'session-1'): Message {
+  return {
+    info: {
+      id,
+      sessionID,
+      role: 'user',
+      time: { created: 1 },
+      agent: 'build',
+      model: { providerID: 'anthropic', modelID: 'claude' },
+    },
+    parts: [
+      {
+        id: `${id}:local-text`,
+        sessionID,
+        messageID: id,
+        type: 'text',
+        text,
+      },
+    ],
+    isLocal: true,
+  }
+}
+
 function createIncompleteMessageWithParts(id: string, text: string, sessionID = 'session-1'): ApiMessageWithParts {
   const info = createAssistantMessage(id, sessionID)
   return {
@@ -99,6 +122,25 @@ describe('messageStore', () => {
 
     messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'hello again')])
     expect(messageStore.isSessionStale('session-1')).toBe(false)
+  })
+
+  it('clears local optimistic parts when the server confirms the same user message id', () => {
+    messageStore.upsertLocalMessage(createUserMessage('message-1', 'local text'))
+
+    messageStore.handlePartUpdated(createTextPart('part-1', 'message-1', 'server text'))
+    messageStore.handleMessageUpdated({
+      id: 'message-1',
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 2 },
+      agent: 'build',
+      model: { providerID: 'anthropic', modelID: 'claude' },
+    })
+
+    const message = messageStore.getSessionState('session-1')?.messages[0]
+    expect(message?.isLocal).toBe(false)
+    expect(message?.parts).toHaveLength(1)
+    expect(message?.parts[0]).toMatchObject({ id: 'part-1', text: 'server text' })
   })
 
   it('can load incomplete assistant history without marking the session as streaming', () => {

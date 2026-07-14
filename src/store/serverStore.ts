@@ -400,7 +400,7 @@ class ServerStore {
     if (!this.servers.some(s => s.id === this.DEFAULT_SERVER_ID)) return false
 
     const normalizedUrl = url.replace(/\/+$/, '')
-    if (this.localServerUrlOverride === normalizedUrl) return false
+    if (this.getLocalServerUrl().replace(/\/+$/, '') === normalizedUrl) return false
 
     this.localServerUrlOverride = normalizedUrl
     this.notify()

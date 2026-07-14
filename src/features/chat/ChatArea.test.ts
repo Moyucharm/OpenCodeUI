@@ -807,8 +807,17 @@ describe('shouldRestoreLoadMoreAnchor', () => {
       shouldRestoreLoadMoreAnchor(
         'message-2',
         [{ messageIds: ['message-1', 'message-2'] }],
-        2,
-        3,
+        true,
+      ),
+    ).toBe(true)
+  })
+
+  it('restores an anchor when the page changed even if the visible message count did not change', () => {
+    expect(
+      shouldRestoreLoadMoreAnchor(
+        'message-2',
+        [{ messageIds: ['message-0', 'message-2'] }],
+        true,
       ),
     ).toBe(true)
   })
@@ -818,8 +827,7 @@ describe('shouldRestoreLoadMoreAnchor', () => {
       shouldRestoreLoadMoreAnchor(
         'message-2',
         [{ messageIds: ['message-1', 'message-2'] }],
-        2,
-        2,
+        false,
       ),
     ).toBe(false)
   })

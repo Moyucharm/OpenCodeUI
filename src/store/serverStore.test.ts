@@ -99,6 +99,17 @@ describe('serverStore local runtime URL', () => {
     expect(listener).toHaveBeenCalledWith('local', 'local-runtime-url')
   })
 
+  it('does not notify active endpoint listeners when the detected URL matches the current local URL', async () => {
+    const { serverStore } = await import('./serverStore')
+    const listener = vi.fn()
+    serverStore.onServerChange(listener)
+
+    expect(serverStore.setLocalServerRuntimeUrl('http://127.0.0.1:4096/')).toBe(false)
+
+    expect(serverStore.getActiveBaseUrl()).toBe('http://127.0.0.1:4096')
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('does not notify active endpoint listeners when local URL changes while remote is active', async () => {
     const { serverStore } = await import('./serverStore')
     const remote = serverStore.addServer({ name: 'Remote', url: 'http://remote.test' })

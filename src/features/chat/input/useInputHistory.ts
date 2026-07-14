@@ -1,5 +1,6 @@
 import { useRef, useMemo, useCallback, useEffect } from 'react'
-import { useMessages } from '../../../store/messageStoreHooks'
+import { useMessageStoreSelector } from '../../../store/messageStoreHooks'
+import type { MessageStoreSnapshot } from '../../../store/messageStoreTypes'
 import { getMessageText, type FilePart, type AgentPart } from '../../../types/message'
 import type { Attachment } from '../../attachment'
 
@@ -35,9 +36,17 @@ interface UseInputHistoryReturn {
   resetHistoryIndex: () => void
 }
 
+function selectUserMessages(state: MessageStoreSnapshot) {
+  return state.messages.filter(message => message.info.role === 'user')
+}
+
+function sameMessages(a: ReturnType<typeof selectUserMessages>, b: ReturnType<typeof selectUserMessages>) {
+  return a.length === b.length && a.every((message, index) => message === b[index])
+}
+
 export function useInputHistory({ textareaRef }: UseInputHistoryOptions): UseInputHistoryReturn {
   // 构建历史条目：从消息列表中提取去重的用户消息
-  const messages = useMessages()
+  const messages = useMessageStoreSelector(selectUserMessages, sameMessages)
   const userHistory = useMemo((): HistoryEntry[] => {
     const entries: HistoryEntry[] = []
     const seen = new Set<string>()

@@ -546,16 +546,27 @@ function InputBoxComponent({
     // 从 attachments 中找 agent mention
     const agentAttachment = attachments.find(a => a.type === 'agent')
     const mentionedAgent = agentAttachment?.agentName
+    const draftSnapshot: HistoryEntry = {
+      text,
+      attachments: [...attachments],
+    }
+
+    resetDraft()
 
     void runSubmit(
       () =>
-        onSend(text, attachments, {
+        onSend(draftSnapshot.text, draftSnapshot.attachments, {
           agent: mentionedAgent || selectedAgent,
           variant: selectedVariant,
         }),
       () => {
-        resetDraft()
         onClearRevert?.()
+      },
+      () => {
+        const currentDraft = latestDraftRef.current
+        if (currentDraft.text.length === 0 && currentDraft.attachments.length === 0) {
+          restoreDraft(draftSnapshot)
+        }
       },
     )
   }, [
@@ -566,6 +577,7 @@ function InputBoxComponent({
     onClearRevert,
     onSend,
     resetDraft,
+    restoreDraft,
     runSubmit,
     selectedAgent,
     selectedVariant,

@@ -53,10 +53,9 @@ export function computeAnchorRestoreScrollDelta(previousTopOffset: number, nextT
 export function shouldRestoreLoadMoreAnchor(
   messageId: string | null,
   pages: readonly Pick<ChatPage, 'messageIds'>[],
-  messageCountBefore: number,
-  messageCountAfter: number,
+  hasPageUpdate: boolean,
 ): boolean {
-  return messageId !== null && messageCountAfter > messageCountBefore && pages.some(page => page.messageIds.includes(messageId))
+  return messageId !== null && hasPageUpdate && pages.some(page => page.messageIds.includes(messageId))
 }
 
 function estimateMessageHeight(message: Message): number {

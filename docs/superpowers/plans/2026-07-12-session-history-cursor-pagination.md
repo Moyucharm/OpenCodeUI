@@ -33,7 +33,7 @@
 - 修改：`src/api/message.ts`
 - 创建：`src/api/message.test.ts`
 
-- [ ] **步骤 1：编写失败的 API 页查询测试**
+- [x] **步骤 1：编写失败的 API 页查询测试**
 
 ```ts
 it('passes before and returns the next cursor from the SDK response', async () => {
@@ -52,13 +52,13 @@ it('passes before and returns the next cursor from the SDK response', async () =
 })
 ```
 
-- [ ] **步骤 2：运行测试确认缺少导出而失败**
+- [x] **步骤 2：运行测试确认缺少导出而失败**
 
 运行：`npx vitest run src/api/message.test.ts`
 
 预期：FAIL，`getSessionMessagePage` 不是导出成员。
 
-- [ ] **步骤 3：升级 SDK 并实现最小页 API**
+- [x] **步骤 3：升级 SDK 并实现最小页 API**
 
 ```ts
 export type SessionMessagePage = {
@@ -83,7 +83,7 @@ export async function getSessionMessagePage(
 }
 ```
 
-- [ ] **步骤 4：运行 API 测试确认通过**
+- [x] **步骤 4：运行 API 测试确认通过**
 
 运行：`npx vitest run src/api/message.test.ts`
 
@@ -97,7 +97,7 @@ export async function getSessionMessagePage(
 - 修改：`src/store/messageStoreHooks.ts`
 - 修改：`src/store/messageStore.test.ts`
 
-- [ ] **步骤 1：编写失败的 store 行为测试**
+- [x] **步骤 1：编写失败的 store 行为测试**
 
 ```ts
 it('retains an established cursor after a latest-page refresh', () => {
@@ -114,13 +114,13 @@ it('retains an established cursor after a latest-page refresh', () => {
 })
 ```
 
-- [ ] **步骤 2：运行 store 测试确认缺少状态/方法而失败**
+- [x] **步骤 2：运行 store 测试确认缺少状态/方法而失败**
 
 运行：`npx vitest run src/store/messageStore.test.ts`
 
 预期：FAIL，历史分页字段或 `mergeMessages` 尚不存在。
 
-- [ ] **步骤 3：实现最小共享分页状态**
+- [x] **步骤 3：实现最小共享分页状态**
 
 ```ts
 historyCursor?: string
@@ -132,7 +132,7 @@ historyGeneration: number
 
 `mergeMessages()` 以 API 快照覆盖同 ID 消息、保留已加载的更早消息并按创建时间排序；force refresh 不得缩短历史。
 
-- [ ] **步骤 4：运行 store 测试确认通过**
+- [x] **步骤 4：运行 store 测试确认通过**
 
 运行：`npx vitest run src/store/messageStore.test.ts src/store/messageStoreHooks.test.tsx`
 
@@ -144,7 +144,7 @@ historyGeneration: number
 - 修改：`src/hooks/useSessionManager.ts`
 - 修改：`src/hooks/useSessionManager.test.tsx`
 
-- [ ] **步骤 1：编写失败的 hook 测试**
+- [x] **步骤 1：编写失败的 hook 测试**
 
 ```ts
 it('requests older history with the stored cursor instead of a larger limit', async () => {
@@ -160,13 +160,13 @@ it('requests older history with the stored cursor instead of a larger limit', as
 })
 ```
 
-- [ ] **步骤 2：运行 hook 测试确认当前累计 limit 行为失败**
+- [x] **步骤 2：运行 hook 测试确认当前累计 limit 行为失败**
 
 运行：`npx vitest run src/hooks/useSessionManager.test.tsx`
 
 预期：FAIL，现有实现以 `targetCursor = currentCursor + 50` 调用旧 API。
 
-- [ ] **步骤 3：实现游标、退路和超时**
+- [x] **步骤 3：实现游标、退路和超时**
 
 ```ts
 const HISTORY_PAGE_SIZE = 50
@@ -177,7 +177,7 @@ const HISTORY_PAGE_SIZE = 50
 
 使用 session store 的 `historyGeneration` 丢弃 force refresh、session switch 或重复 load-more 之后返回的陈旧响应。为初始和历史请求使用同一个可清理 `AbortController` 超时；初始失败写入 `loadError`，历史失败写入 `historyLoadError`。缓存已有消息时保持 `loaded` 状态；force refresh 用 `mergeMessages()` 更新最新快照。
 
-- [ ] **步骤 4：运行 hook 测试确认通过**
+- [x] **步骤 4：运行 hook 测试确认通过**
 
 运行：`npx vitest run src/hooks/useSessionManager.test.tsx`
 
@@ -191,7 +191,7 @@ const HISTORY_PAGE_SIZE = 50
 - 修改：`src/features/chat/ChatArea.tsx`
 - 修改：`src/features/chat/ChatArea.test.ts`
 
-- [ ] **步骤 1：编写失败的纯模型回归测试**
+- [x] **步骤 1：编写失败的纯模型回归测试**
 
 ```ts
 it('restores the captured anchor when prepending fills an existing page', () => {
@@ -201,13 +201,13 @@ it('restores the captured anchor when prepending fills an existing page', () => 
 })
 ```
 
-- [ ] **步骤 2：运行测试确认页数未增加时当前逻辑失败**
+- [x] **步骤 2：运行测试确认页数未增加时当前逻辑失败**
 
 运行：`npx vitest run src/features/chat/ChatArea.test.ts`
 
 预期：FAIL，当前实现只在 `activePages.length > anchor.pageCountBefore` 时恢复。
 
-- [ ] **步骤 3：实现基于实际 prepend 的锚点恢复**
+- [x] **步骤 3：实现基于实际 prepend 的锚点恢复**
 
 ```ts
 function shouldRestoreLoadMoreAnchor(anchor: LoadMoreAnchorSnapshot | null, hasPageUpdate: boolean) {
@@ -217,7 +217,7 @@ function shouldRestoreLoadMoreAnchor(anchor: LoadMoreAnchorSnapshot | null, hasP
 
 移除“page count 必须增加”的前置条件：只要历史结果改变 `activePages` 且已渲染 anchor message，就恢复原来的偏移量。通过 `useChatSession` 和 `ChatPane` 把 `isLoadingHistory`、`historyLoadError` 传到 `ChatArea`；历史失败时在顶部显示错误及重试入口，不隐藏已存在消息。
 
-- [ ] **步骤 4：运行聊天区测试确认通过**
+- [x] **步骤 4：运行聊天区测试确认通过**
 
 运行：`npx vitest run src/features/chat/ChatArea.test.ts`
 
@@ -228,13 +228,13 @@ function shouldRestoreLoadMoreAnchor(anchor: LoadMoreAnchorSnapshot | null, hasP
 **文件：**
 - 修改：无
 
-- [ ] **步骤 1：运行聚焦测试**
+- [x] **步骤 1：运行聚焦测试**
 
 运行：`npx vitest run src/api/message.test.ts src/hooks/useSessionManager.test.tsx src/store/messageStore.test.ts src/features/chat/ChatArea.test.ts`
 
 预期：PASS。
 
-- [ ] **步骤 2：运行类型、代码风格和全量测试**
+- [x] **步骤 2：运行类型、代码风格和全量测试**
 
 运行：`npm run validate`
 

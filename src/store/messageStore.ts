@@ -32,6 +32,7 @@ export type {
 type Subscriber = () => void
 
 const MAX_CACHED_SESSIONS = 10
+const STREAM_DELTA_NOTIFY_INTERVAL_MS = 50
 
 function compareMessagesByCreatedAt(a: Message, b: Message): number {
   const createdDifference = (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0)
@@ -71,6 +72,11 @@ class MessageStore {
   private rafId: number | null = null
   // delta 批量化：按 session 追踪被 mutable 修改过的消息，在 notify 前统一做不可变快照
   private dirtyMessagesBySession = new Map<string, Set<string>>()
+  private pendingDeltaSessionIds = new Set<string>()
+  private deltaNotifyTimer: ReturnType<typeof setTimeout> | null = null
+  private lastDeltaNotifyAt: number | null = null
+  private pendingPartUpdateSessionIds = new Set<string>()
+  private partUpdateRafId: number | null = null
 
   // ============================================
   // Subscription & Notification
@@ -204,6 +210,25 @@ class MessageStore {
     this.flushSessionSubscribers()
   }
 
+  private notifyPartUpdated(sessionId: string) {
+    this.pendingPartUpdateSessionIds.add(sessionId)
+    if (this.partUpdateRafId !== null) return
+
+    if (typeof requestAnimationFrame !== 'undefined') {
+      this.partUpdateRafId = requestAnimationFrame(() => {
+        this.partUpdateRafId = null
+        const sessionIds = Array.from(this.pendingPartUpdateSessionIds)
+        this.pendingPartUpdateSessionIds.clear()
+        this.notifyImmediate(sessionIds)
+      })
+      return
+    }
+
+    const sessionIds = Array.from(this.pendingPartUpdateSessionIds)
+    this.pendingPartUpdateSessionIds.clear()
+    this.notify(sessionIds)
+  }
+
   // ============================================
   // Getters
   // ============================================
@@ -299,6 +324,32 @@ class MessageStore {
       this.sessions.set(sessionId, state)
     }
     return state
+  }
+
+  private notifyStreamingDelta(sessionId: string) {
+    this.pendingDeltaSessionIds.add(sessionId)
+    if (this.deltaNotifyTimer !== null) return
+
+    const now = performance.now()
+    const remaining =
+      this.lastDeltaNotifyAt === null
+        ? 0
+        : Math.max(0, STREAM_DELTA_NOTIFY_INTERVAL_MS - (now - this.lastDeltaNotifyAt))
+    if (remaining === 0) {
+      this.lastDeltaNotifyAt = now
+      const sessionIds = Array.from(this.pendingDeltaSessionIds)
+      this.pendingDeltaSessionIds.clear()
+      this.notify(sessionIds)
+      return
+    }
+
+    this.deltaNotifyTimer = setTimeout(() => {
+      this.deltaNotifyTimer = null
+      this.lastDeltaNotifyAt = performance.now()
+      const sessionIds = Array.from(this.pendingDeltaSessionIds)
+      this.pendingDeltaSessionIds.clear()
+      this.notify(sessionIds)
+    }, remaining)
   }
 
   private invalidateHistoryLoadState(state: SessionState) {
@@ -609,6 +660,17 @@ class MessageStore {
     this.sessions.clear()
     this.sessionAccessTime.clear()
     this.dirtyMessagesBySession.clear()
+    this.pendingDeltaSessionIds.clear()
+    this.pendingPartUpdateSessionIds.clear()
+    if (this.deltaNotifyTimer !== null) {
+      clearTimeout(this.deltaNotifyTimer)
+      this.deltaNotifyTimer = null
+    }
+    this.lastDeltaNotifyAt = null
+    if (this.partUpdateRafId !== null) {
+      cancelAnimationFrame(this.partUpdateRafId)
+      this.partUpdateRafId = null
+    }
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
@@ -641,7 +703,12 @@ class MessageStore {
 
     if (existingIndex >= 0) {
       const oldMessage = state.messages[existingIndex]
-      const newMessage = { ...oldMessage, info: toUIMessageInfo(apiMsg) }
+      const newMessage = {
+        ...oldMessage,
+        info: toUIMessageInfo(apiMsg),
+        parts: oldMessage.isLocal ? [] : oldMessage.parts,
+        isLocal: false,
+      }
       state.messages = [
         ...state.messages.slice(0, existingIndex),
         newMessage,
@@ -670,7 +737,7 @@ class MessageStore {
     if (msgIndex === -1) return
 
     const oldMessage = state.messages[msgIndex]
-    const newParts = [...oldMessage.parts]
+    const newParts = oldMessage.isLocal ? [] : [...oldMessage.parts]
     const existingPartIndex = newParts.findIndex(p => p.id === apiPart.id)
 
     if (existingPartIndex >= 0) {
@@ -679,9 +746,9 @@ class MessageStore {
       newParts.push(toUIPart(apiPart))
     }
 
-    const newMessage = { ...oldMessage, parts: newParts }
+    const newMessage = { ...oldMessage, parts: newParts, isLocal: false }
     state.messages = [...state.messages.slice(0, msgIndex), newMessage, ...state.messages.slice(msgIndex + 1)]
-    this.notify([apiPart.sessionID])
+    this.notifyPartUpdated(apiPart.sessionID)
   }
 
   handlePartDelta(data: { sessionID: string; messageID: string; partID: string; field: string; delta: string }) {
@@ -706,7 +773,7 @@ class MessageStore {
       this.dirtyMessagesBySession.set(data.sessionID, dirtyMessages)
     }
     dirtyMessages.add(data.messageID)
-    this.notify([data.sessionID])
+    this.notifyStreamingDelta(data.sessionID)
   }
 
   handlePartRemoved(data: { partID: string; messageID: string; sessionID: string }) {

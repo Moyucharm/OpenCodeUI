@@ -58,7 +58,7 @@ const PENDING_LAYOUT_ANCHOR_TIMEOUT_MS = 300
 type LoadMoreAnchorSnapshot = {
   messageId: string
   topOffset: number
-  messageCountBefore: number
+  pageMessageSignatureBefore: string
 }
 
 /** Stable no-op to avoid creating a new closure on every render. */
@@ -76,7 +76,7 @@ function pageHasUserMessage(page: ChatPage): boolean {
   return page.rows.some(row => row.messages.some(message => message.info.role === 'user'))
 }
 
-function captureLoadMoreAnchor(root: HTMLElement, messageCountBefore = 0): LoadMoreAnchorSnapshot | null {
+function captureLoadMoreAnchor(root: HTMLElement, pageMessageSignatureBefore = ''): LoadMoreAnchorSnapshot | null {
   const rootRect = root.getBoundingClientRect()
   const candidates = root.querySelectorAll<HTMLElement>('[data-message-id]')
 
@@ -90,7 +90,7 @@ function captureLoadMoreAnchor(root: HTMLElement, messageCountBefore = 0): LoadM
     if (!intersectsViewport) continue
 
     const topOffset = rect.top - rootRect.top
-    if (!best || topOffset < best.topOffset) best = { messageId, topOffset, messageCountBefore }
+    if (!best || topOffset < best.topOffset) best = { messageId, topOffset, pageMessageSignatureBefore }
   }
 
   return best
@@ -238,6 +238,10 @@ export const ChatArea = memo(
       )
 
       const activePages = pageRecords ?? pages
+      const activePageMessageSignature = useMemo(
+        () => activePages.map(page => page.messageIds.join(',')).join('|'),
+        [activePages],
+      )
 
       useLayoutEffect(() => {
         const previous = previousActivePagesRef.current
@@ -549,7 +553,7 @@ export const ChatArea = memo(
 
         const root = scrollRef.current
         if (root) {
-          const anchor = captureLoadMoreAnchor(root, visibleMessages.length)
+          const anchor = captureLoadMoreAnchor(root, activePageMessageSignature)
           pendingLoadMoreAnchorRef.current = anchor
           setPendingLoadMoreAnchorMessageId(anchor?.messageId ?? null)
         }
@@ -563,7 +567,7 @@ export const ChatArea = memo(
           isLoadingRef.current = false
           setIsLoadingMore(false)
         })
-      }, [sessionId, visibleMessages.length])
+      }, [activePageMessageSignature, sessionId])
 
       const tryLoadMore = useCallback(() => {
         if (!topSentinelVisibleRef.current || loadMoreBlockedRef.current) return
@@ -622,8 +626,7 @@ export const ChatArea = memo(
           !shouldRestoreLoadMoreAnchor(
             anchor?.messageId ?? null,
             activePages,
-            anchor?.messageCountBefore ?? 0,
-            visibleMessages.length,
+            activePageMessageSignature !== anchor.pageMessageSignatureBefore,
           )
         ) {
           return
@@ -642,7 +645,7 @@ export const ChatArea = memo(
           root.scrollTop += delta
           updateScrollOffsetSnapshot()
         }
-      }, [activePages, clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot, visibleMessages.length])
+      }, [activePageMessageSignature, activePages, clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot])
 
       useLayoutEffect(() => {
         const anchor = pendingLayoutAnchorRef.current
@@ -987,6 +990,8 @@ interface PageBlockProps {
   onMeasuredHeightChange: (pageKey: string, nextHeight: number) => void
 }
 
+const STREAMING_PAGE_MEASURE_INTERVAL_MS = 80
+
 interface PageDerivedValueProps {
   page: ChatPage
   turnDurationMap: Map<string, number>
@@ -1023,14 +1028,38 @@ export function arePageBlockPropsEqual(previous: PageBlockProps, next: PageBlock
 function usePageHeightMeasurement(
   pageKey: string,
   onMeasuredHeightChange: (pageKey: string, nextHeight: number) => void,
+  isStreamingPage: boolean,
 ) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const lastMeasureAtRef = useRef(0)
+  const pendingMeasureTimerRef = useRef<number | null>(null)
+  const pendingMeasureRafRef = useRef<number | null>(null)
 
   const measure = useCallback(() => {
     const element = wrapperRef.current
     if (!element) return
     onMeasuredHeightChange(pageKey, element.offsetHeight)
   }, [onMeasuredHeightChange, pageKey])
+
+  const scheduleMeasure = useCallback(() => {
+    if (!isStreamingPage) {
+      measure()
+      return
+    }
+
+    const elapsed = performance.now() - lastMeasureAtRef.current
+    const delay = Math.max(0, STREAMING_PAGE_MEASURE_INTERVAL_MS - elapsed)
+    if (pendingMeasureTimerRef.current !== null || pendingMeasureRafRef.current !== null) return
+
+    pendingMeasureTimerRef.current = window.setTimeout(() => {
+      pendingMeasureTimerRef.current = null
+      pendingMeasureRafRef.current = requestAnimationFrame(() => {
+        pendingMeasureRafRef.current = null
+        lastMeasureAtRef.current = performance.now()
+        measure()
+      })
+    }, delay)
+  }, [isStreamingPage, measure])
 
   useLayoutEffect(() => {
     measure()
@@ -1040,10 +1069,20 @@ function usePageHeightMeasurement(
     const element = wrapperRef.current
     if (!element || typeof ResizeObserver === 'undefined') return
 
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(scheduleMeasure)
     observer.observe(element)
-    return () => observer.disconnect()
-  }, [measure])
+    return () => {
+      observer.disconnect()
+      if (pendingMeasureTimerRef.current !== null) {
+        window.clearTimeout(pendingMeasureTimerRef.current)
+        pendingMeasureTimerRef.current = null
+      }
+      if (pendingMeasureRafRef.current !== null) {
+        cancelAnimationFrame(pendingMeasureRafRef.current)
+        pendingMeasureRafRef.current = null
+      }
+    }
+  }, [scheduleMeasure])
 
   return wrapperRef
 }
@@ -1061,7 +1100,8 @@ const PageBlock = memo(function PageBlock({
   allowStreamingLayoutAnimation,
   onMeasuredHeightChange,
 }: PageBlockProps) {
-  const wrapperRef = usePageHeightMeasurement(page.key, onMeasuredHeightChange)
+  const isStreamingPage = pageHasStreamingMessage(page)
+  const wrapperRef = usePageHeightMeasurement(page.key, onMeasuredHeightChange, isStreamingPage)
 
   return (
     <div ref={wrapperRef} className="shrink-0 contain-content" data-page-key={page.key}>

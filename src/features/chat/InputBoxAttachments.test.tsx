@@ -59,6 +59,7 @@ vi.mock('../../hooks', () => ({
 
 vi.mock('../../store/messageStoreHooks', () => ({
   useMessages: () => [],
+  useMessageStoreSelector: () => [],
 }))
 
 vi.mock('../../store/keybindingStore', () => ({
