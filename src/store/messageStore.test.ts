@@ -143,6 +143,22 @@ describe('messageStore', () => {
     expect(message?.parts[0]).toMatchObject({ id: 'part-1', text: 'server text' })
   })
 
+  it('preserves local optimistic messages when loading UI messages', () => {
+    messageStore.setUIMessages('session-1', [createUserMessage('message-1', 'local text')])
+
+    const message = messageStore.getSessionState('session-1')?.messages[0]
+    expect(message?.isLocal).toBe(true)
+    expect(message?.parts[0]).toMatchObject({ text: 'local text' })
+  })
+
+  it('keeps the session streaming when the newest loaded UI message is a local user message', () => {
+    messageStore.setUIMessages('session-1', [createUserMessage('message-1', 'local text')], {
+      inferStreaming: true,
+    })
+
+    expect(messageStore.getSessionState('session-1')?.isStreaming).toBe(true)
+  })
+
   it('can load incomplete assistant history without marking the session as streaming', () => {
     messageStore.setMessages('session-1', [createIncompleteMessageWithParts('message-1', 'partial')], {
       inferStreaming: false,

@@ -34,6 +34,17 @@ type Subscriber = () => void
 const MAX_CACHED_SESSIONS = 10
 const STREAM_DELTA_NOTIFY_INTERVAL_MS = 50
 
+type SetLoadedMessagesOptions = {
+  directory?: string
+  title?: string
+  hasMoreHistory?: boolean
+  historyCursor?: string
+  paginationMode?: HistoryPaginationMode
+  revertState?: ApiSession['revert'] | null
+  shareUrl?: string
+  inferStreaming?: boolean
+}
+
 function compareMessagesByCreatedAt(a: Message, b: Message): number {
   const createdDifference = (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0)
   return createdDifference || a.info.id.localeCompare(b.info.id)
@@ -527,24 +538,11 @@ class MessageStore {
   // Message CRUD
   // ============================================
 
-  setMessages(
-    sessionId: string,
-    apiMessages: ApiMessageWithParts[],
-    options?: {
-      directory?: string
-      title?: string
-      hasMoreHistory?: boolean
-      historyCursor?: string
-      paginationMode?: HistoryPaginationMode
-      revertState?: ApiSession['revert'] | null
-      shareUrl?: string
-      inferStreaming?: boolean
-    },
-  ) {
+  private applyLoadedMessages(sessionId: string, messages: Message[], options?: SetLoadedMessagesOptions) {
     const state = this.ensureSession(sessionId)
 
     this.invalidateHistoryLoadState(state)
-    state.messages = apiMessages.map(toUIMessage)
+    state.messages = messages
     state.loadState = 'loaded'
     state.loadError = undefined
     state.hasMoreHistory = options?.hasMoreHistory ?? false
@@ -566,21 +564,31 @@ class MessageStore {
       }
     }
 
-    // Streaming 检测
     const inferStreaming = options?.inferStreaming ?? true
-    const lastMsg = state.messages[state.messages.length - 1]
-    if (lastMsg?.info.role === 'assistant') {
-      const isLastMsgStreaming = inferStreaming && !lastMsg.info.time?.completed
-      state.isStreaming = isLastMsgStreaming
-      if (isLastMsgStreaming) {
-        const lastIndex = state.messages.length - 1
-        state.messages[lastIndex] = { ...state.messages[lastIndex], isStreaming: true }
-      }
-    } else {
-      state.isStreaming = false
+    const lastIndex = state.messages.length - 1
+    const lastMsg = state.messages[lastIndex]
+    const isLastAssistantStreaming = inferStreaming && lastMsg?.info.role === 'assistant' && !lastMsg.info.time?.completed
+    const hasLocalStreamingMessage = inferStreaming && state.messages.some(message => message.isStreaming)
+    const hasPendingLocalUser = inferStreaming && lastMsg?.info.role === 'user' && lastMsg.isLocal === true
+    state.isStreaming = isLastAssistantStreaming || hasLocalStreamingMessage || hasPendingLocalUser
+
+    if (isLastAssistantStreaming && lastMsg) {
+      state.messages[lastIndex] = { ...lastMsg, isStreaming: true }
     }
 
     this.notify([sessionId])
+  }
+
+  setMessages(
+    sessionId: string,
+    apiMessages: ApiMessageWithParts[],
+    options?: SetLoadedMessagesOptions,
+  ) {
+    this.applyLoadedMessages(sessionId, apiMessages.map(toUIMessage), options)
+  }
+
+  setUIMessages(sessionId: string, messages: Message[], options?: SetLoadedMessagesOptions) {
+    this.applyLoadedMessages(sessionId, messages, options)
   }
 
   mergeMessages(

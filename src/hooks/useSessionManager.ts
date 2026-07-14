@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef } from 'react'
 import { logger } from '../utils/logger'
-import { isUserUIMessage, toApiMessageWithParts } from '../utils/messageConversion'
+import { isUserUIMessage, toUIMessage } from '../utils/messageConversion'
 import { messageStore, type RevertState, type SessionState } from '../store'
 import {
   getSessionMessagePage,
@@ -22,7 +22,7 @@ import {
 import { sessionErrorHandler } from '../utils'
 import { isSessionNotFoundError } from '../utils/sessionErrors'
 import { INITIAL_MESSAGE_LIMIT, HISTORY_LOAD_BATCH_SIZE } from '../constants'
-import type { MessageError } from '../types/message'
+import type { Message, MessageError } from '../types/message'
 
 const INITIAL_MESSAGE_REQUEST_TIMEOUT_MS = 30_000
 const loadGenerationBySession = new Map<string, number>()
@@ -56,21 +56,30 @@ interface UseSessionManagerOptions {
 function mergeWithLocalStreamingMessages(
   apiMessages: ApiMessageWithParts[],
   localState?: SessionState,
-): ApiMessageWithParts[] {
-  if (!localState?.isStreaming || localState.messages.length === 0) return apiMessages
+): Message[] {
+  const apiUiMessages = apiMessages.map(toUIMessage)
+  if (!localState || localState.messages.length === 0) return apiUiMessages
+
+  const hasLocalMessage = localState.messages.some(message => message.isLocal)
+  if (!localState.isStreaming && !hasLocalMessage) return apiUiMessages
 
   const localById = new Map(localState.messages.map(message => [message.info.id, message]))
-  const apiIds = new Set(apiMessages.map(m => m.info.id))
-  const localOnly = localState.messages.filter(m => !apiIds.has(m.info.id)).map(toApiMessageWithParts)
+  const apiIds = new Set(apiUiMessages.map(message => message.info.id))
+  const localOnly = localState.messages.filter(message => !apiIds.has(message.info.id))
 
-  const mergedApiMessages = apiMessages.map(message => {
+  const mergedMessages = apiUiMessages.map(message => {
     const localMessage = localById.get(message.info.id)
-    return localMessage?.isStreaming ? toApiMessageWithParts(localMessage) : message
+    return localMessage?.isStreaming ? localMessage : message
   })
 
-  if (localOnly.length === 0) return mergedApiMessages
+  if (localOnly.length === 0) return mergedMessages
 
-  return [...mergedApiMessages, ...localOnly].sort(compareApiMessagesByCreatedAt)
+  return [...mergedMessages, ...localOnly].sort(compareMessagesByCreatedAt)
+}
+
+function compareMessagesByCreatedAt(a: Message, b: Message): number {
+  const createdDifference = (a.info.time?.created ?? 0) - (b.info.time?.created ?? 0)
+  return createdDifference || a.info.id.localeCompare(b.info.id)
 }
 
 function compareApiMessagesByCreatedAt(a: ApiMessageWithParts, b: ApiMessageWithParts): number {
@@ -251,7 +260,7 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
           const mergedMessages = mergeWithLocalStreamingMessages(apiMessages, currentState)
 
           // 设置消息到 store
-          messageStore.setMessages(sid, mergedMessages, {
+          messageStore.setUIMessages(sid, mergedMessages, {
             directory: loadedSessionInfo?.directory ?? dir ?? '',
             title: loadedSessionInfo?.title,
             hasMoreHistory,

@@ -24,6 +24,7 @@ const {
     setLoadState: vi.fn(),
     setLoadError: vi.fn(),
     setMessages: vi.fn(),
+    setUIMessages: vi.fn(),
     updateSessionMetadata: vi.fn(),
     prependMessages: vi.fn(),
     beginHistoryLoad: vi.fn(),
@@ -88,6 +89,10 @@ function createUserMessage(id: string, created: number) {
   }
 }
 
+function toLoadedUIMessages<T extends { info: unknown; parts: unknown }>(messages: T[]) {
+  return messages.map(message => ({ ...message, isStreaming: false }))
+}
+
 describe('useSessionManager', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -105,6 +110,7 @@ describe('useSessionManager', () => {
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
     messageStoreMock.setMessages.mockReset()
+    messageStoreMock.setUIMessages.mockReset()
     messageStoreMock.updateSessionMetadata.mockReset()
     messageStoreMock.prependMessages.mockReset()
     messageStoreMock.beginHistoryLoad.mockReset()
@@ -184,9 +190,9 @@ describe('useSessionManager', () => {
     )
 
     await waitFor(() => {
-      expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
         'session-1',
-        messages,
+        toLoadedUIMessages(messages),
         expect.objectContaining({ inferStreaming: false }),
       )
     })
@@ -212,9 +218,9 @@ describe('useSessionManager', () => {
       })
     })
 
-    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+    expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
       'session-1',
-      messages,
+      toLoadedUIMessages(messages),
       expect.objectContaining({
         historyCursor: 'older-1',
         paginationMode: 'cursor',
@@ -237,7 +243,7 @@ describe('useSessionManager', () => {
     )
 
     await waitFor(() => {
-      expect(messageStoreMock.setMessages).toHaveBeenCalledWith('session-1', messages, expect.any(Object))
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith('session-1', toLoadedUIMessages(messages), expect.any(Object))
     })
   })
 
@@ -269,7 +275,7 @@ describe('useSessionManager', () => {
       .mockResolvedValueOnce({ messages: [latest], nextCursor: 'cursor-1' })
       .mockResolvedValueOnce({ messages: [middle], nextCursor: 'cursor-2' })
       .mockResolvedValueOnce({ messages: [revertTarget], nextCursor: undefined })
-    messageStoreMock.setMessages.mockImplementation(
+    messageStoreMock.setUIMessages.mockImplementation(
       (_sessionId: string, messages: ReturnType<typeof createMessage>[], options: {
         hasMoreHistory: boolean
         historyCursor: string | undefined
@@ -655,7 +661,7 @@ describe('useSessionManager', () => {
       latestPage,
       expect.objectContaining({ preserveHistory: true }),
     )
-    expect(messageStoreMock.setMessages).not.toHaveBeenCalled()
+    expect(messageStoreMock.setUIMessages).not.toHaveBeenCalled()
   })
 
   it('preserves local streaming data when a force refresh receives an older snapshot', async () => {
@@ -709,7 +715,7 @@ describe('useSessionManager', () => {
       }),
     )
 
-    await waitFor(() => expect(messageStoreMock.setMessages).toHaveBeenCalled())
+    await waitFor(() => expect(messageStoreMock.setUIMessages).toHaveBeenCalled())
 
     await act(async () => {
       resolveSession({ id: 'session-1', directory: '/workspace/demo', revert: { messageID: 'message-1' } })
@@ -741,7 +747,7 @@ describe('useSessionManager', () => {
       }),
     )
 
-    await waitFor(() => expect(messageStoreMock.setMessages).toHaveBeenCalled())
+    await waitFor(() => expect(messageStoreMock.setUIMessages).toHaveBeenCalled())
     state.revertState = { messageId: 'local-revert' }
     state.localRevertGeneration = 1
 
@@ -798,9 +804,9 @@ describe('useSessionManager', () => {
       await load
     })
 
-    expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+    expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
       'session-1',
-      [createMessage('message-1', 1)],
+      toLoadedUIMessages([createMessage('message-1', 1)]),
       expect.not.objectContaining({ revertState: null }),
     )
 
@@ -1056,7 +1062,7 @@ describe('useSessionManager', () => {
       latestPage,
       expect.objectContaining({ preserveHistory: true }),
     )
-    expect(messageStoreMock.setMessages).not.toHaveBeenCalled()
+    expect(messageStoreMock.setUIMessages).not.toHaveBeenCalled()
   })
 
   it('ignores an older pane load when another pane force-refreshes the same session', async () => {
@@ -1094,15 +1100,19 @@ describe('useSessionManager', () => {
       await newerLoad
     })
 
-    expect(messageStoreMock.setMessages).toHaveBeenCalledTimes(1)
-    expect(messageStoreMock.setMessages).toHaveBeenCalledWith('session-1', [newMessage], expect.any(Object))
+    expect(messageStoreMock.setUIMessages).toHaveBeenCalledTimes(1)
+    expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
+      'session-1',
+      toLoadedUIMessages([newMessage]),
+      expect.any(Object),
+    )
 
     await act(async () => {
       resolveOlderPage({ messages: [oldMessage], nextCursor: undefined })
       await olderLoad
     })
 
-    expect(messageStoreMock.setMessages).toHaveBeenCalledTimes(1)
+    expect(messageStoreMock.setUIMessages).toHaveBeenCalledTimes(1)
     expect(messageStoreMock.mergeMessages).not.toHaveBeenCalled()
   })
 
@@ -1129,7 +1139,7 @@ describe('useSessionManager', () => {
       await load
     })
 
-    expect(messageStoreMock.setMessages).not.toHaveBeenCalled()
+    expect(messageStoreMock.setUIMessages).not.toHaveBeenCalled()
     expect(messageStoreMock.setLoadError).not.toHaveBeenCalled()
   })
 
@@ -1204,9 +1214,128 @@ describe('useSessionManager', () => {
     )
 
     await waitFor(() => {
-      expect(messageStoreMock.setMessages).toHaveBeenCalledWith(
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
         'session-1',
-        messages,
+        [
+          {
+            ...messages[0],
+            isStreaming: true,
+          },
+        ],
+        expect.objectContaining({ inferStreaming: true }),
+      )
+    })
+  })
+
+  it('preserves a local optimistic user message missing from the initial page', async () => {
+    const serverMessage = createMessage('assistant-1', 1)
+    const localMessage = {
+      ...createUserMessage('local-user-1', 2),
+      isLocal: true,
+    }
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [localMessage],
+      isStreaming: true,
+      isStale: false,
+      loadState: 'idle',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'unknown',
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock.mockResolvedValue({ messages: [serverMessage], nextCursor: undefined })
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
+        'session-1',
+        [
+          { ...serverMessage, isStreaming: false },
+          localMessage,
+        ],
+        expect.objectContaining({ inferStreaming: true }),
+      )
+    })
+  })
+
+  it('preserves a local optimistic user message even when the session is not streaming', async () => {
+    const serverMessage = createMessage('assistant-1', 1)
+    const localMessage = {
+      ...createUserMessage('local-user-1', 2),
+      isLocal: true,
+    }
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [localMessage],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'idle',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'unknown',
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock.mockResolvedValue({ messages: [serverMessage], nextCursor: undefined })
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
+        'session-1',
+        [
+          { ...serverMessage, isStreaming: false },
+          localMessage,
+        ],
+        expect.objectContaining({ inferStreaming: false }),
+      )
+    })
+  })
+
+  it('uses the server message when an optimistic local user message is confirmed with the same id', async () => {
+    const localMessage = {
+      ...createUserMessage('user-1', 1),
+      isLocal: true,
+    }
+    const serverMessage = {
+      ...createUserMessage('user-1', 2),
+      parts: [{ id: 'server-part-user-1', sessionID: 'session-1', messageID: 'user-1', type: 'text', text: 'server text' }],
+    }
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [localMessage],
+      isStreaming: true,
+      isStale: false,
+      loadState: 'idle',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'unknown',
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock.mockResolvedValue({ messages: [serverMessage], nextCursor: undefined })
+
+    renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(messageStoreMock.setUIMessages).toHaveBeenCalledWith(
+        'session-1',
+        [{ ...serverMessage, isStreaming: false }],
         expect.objectContaining({ inferStreaming: true }),
       )
     })
