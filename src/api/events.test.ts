@@ -164,6 +164,32 @@ describe('subscribeToEvents', () => {
     expect(received).toBe('2026-04-22T15:00:00.000Z')
   })
 
+  it('dispatches message.removed payloads', async () => {
+    const payload = {
+      type: EventTypes.MESSAGE_REMOVED,
+      properties: { sessionID: 'session-1', messageID: 'message-1' },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(createFetchResponse(createEventChunk(payload)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { subscribeToEvents } = await import('./events')
+
+    const received = await new Promise((resolve, reject) => {
+      const unsubscribe = subscribeToEvents({
+        onMessageRemoved(data) {
+          unsubscribe()
+          resolve(data)
+        },
+        onError(error) {
+          unsubscribe()
+          reject(error)
+        },
+      })
+    })
+
+    expect(received).toEqual(payload.properties)
+  })
+
   it('ignores stale server.connected events from an old browser SSE generation after reconnect', async () => {
     const firstFetch = createDeferred<Pick<Response, 'ok' | 'body'>>()
     const secondFetch = createDeferred<Pick<Response, 'ok' | 'body'>>()

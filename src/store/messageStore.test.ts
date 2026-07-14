@@ -218,6 +218,45 @@ describe('messageStore', () => {
     expect(state?.messages[0].parts).toHaveLength(0)
   })
 
+  it('removes a message when the server emits message.removed', () => {
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one'),
+      createMessageWithParts('message-2', 'two'),
+    ])
+
+    messageStore.handleMessageRemoved({ sessionID: 'session-1', messageID: 'message-1' })
+
+    expect(messageStore.getSessionState('session-1')?.messages.map(message => message.info.id)).toEqual(['message-2'])
+  })
+
+  it('keeps reverted messages hidden when message.removed deletes the revert target', () => {
+    messageStore.setMessages('session-1', [
+      createMessageWithParts('message-1', 'one'),
+      createMessageWithParts('message-2', 'two'),
+      createMessageWithParts('message-3', 'three'),
+    ])
+    messageStore.setRevertState('session-1', {
+      messageId: 'message-2',
+      history: [],
+    })
+
+    messageStore.handleMessageRemoved({ sessionID: 'session-1', messageID: 'message-2' })
+
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual(['message-1'])
+    expect(messageStore.getSessionState('session-1')?.messages.map(message => message.info.id)).toEqual(['message-1'])
+  })
+
+  it('clears pending server revert when message.removed deletes its target', () => {
+    messageStore.setMessages('session-1', [createMessageWithParts('message-1', 'one')], {
+      revertState: { messageID: 'message-2' },
+    })
+
+    messageStore.handleMessageRemoved({ sessionID: 'session-1', messageID: 'message-2' })
+
+    expect(messageStore.getSessionState('session-1')?.pendingRevertState).toBeUndefined()
+    expect(messageStore.getVisibleMessages('session-1').map(message => message.info.id)).toEqual(['message-1'])
+  })
+
   it('deduplicates messages in prependMessages', () => {
     messageStore.setMessages('session-1', [createMessageWithParts('message-2', 'two')])
 

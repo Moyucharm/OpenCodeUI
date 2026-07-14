@@ -42,6 +42,11 @@ export type SessionDiffPayload = SDKEventSessionDiff['properties']
 
 export type PartRemovedPayload = SDKEventMessagePartRemoved['properties']
 
+export interface MessageRemovedPayload {
+  sessionID: string
+  messageID: string
+}
+
 export type PartDeltaPayload = SDKEventMessagePartDelta['properties']
 
 export type PermissionRepliedPayload = SDKEventPermissionReplied['properties']
@@ -152,6 +157,7 @@ export type EventType = SDKGlobalEvent['payload']['type']
 
 export interface EventCallbacks {
   onMessageUpdated?: (message: Message) => void
+  onMessageRemoved?: (data: MessageRemovedPayload) => void
   onPartUpdated?: (part: Part) => void
   onPartDelta?: (data: PartDeltaPayload) => void
   onPartRemoved?: (data: PartRemovedPayload) => void

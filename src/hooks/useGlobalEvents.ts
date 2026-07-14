@@ -512,6 +512,10 @@ export function useGlobalEvents(directories?: string[]) {
         messageStore.handleMessageUpdated(apiMsg)
       },
 
+      onMessageRemoved: data => {
+        messageStore.handleMessageRemoved(data)
+      },
+
       onPartUpdated: (apiPart: ApiPart) => {
         if ('sessionID' in apiPart && 'messageID' in apiPart) {
           messageStore.handlePartUpdated(apiPart as ApiPart & { sessionID: string; messageID: string })

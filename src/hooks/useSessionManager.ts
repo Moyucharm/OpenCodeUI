@@ -103,6 +103,24 @@ function getInitialMessagePage(sessionId: string, directory?: string) {
   })
 }
 
+function getLatestUserUndoGuard(messages: SessionState['messages'], userMessageId: string): { previousAssistantId: string } | null {
+  const userIndex = messages.findIndex(message => message.info.id === userMessageId)
+  if (userIndex === -1) return null
+
+  const messagesAfterTarget = messages.slice(userIndex + 1)
+  const hasLaterUserMessage = messagesAfterTarget.some(message => message.info.role === 'user')
+  const hasRenderableAssistantAfterTarget = messagesAfterTarget.some(
+    message => message.info.role === 'assistant' && message.parts.length > 0,
+  )
+  if (hasLaterUserMessage || hasRenderableAssistantAfterTarget) return null
+
+  for (let index = userIndex - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.info.role === 'assistant') return { previousAssistantId: message.info.id }
+  }
+  return null
+}
+
 export function useSessionManager({ sessionId, directory, onLoadComplete, onError, onSessionMissing }: UseSessionManagerOptions) {
   const loadSessionRef = useRef<(sid: string, options?: { force?: boolean }) => Promise<void>>(async () => {})
   const loadMoreHistoryRef = useRef<(sid?: string) => Promise<void>>(async () => {})
@@ -354,10 +372,27 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
       if (!state) return
 
       const dir = state.directory || directoryRef.current
+      const latestUserUndoGuard = getLatestUserUndoGuard(state.messages, userMessageId)
+      let didRevertOnServer = false
 
       try {
         // 调用 API 设置 revert 点（传递 directory）
         await revertMessage(sessionId, userMessageId, undefined, dir)
+        didRevertOnServer = true
+
+        if (latestUserUndoGuard) {
+          const page = await getInitialMessagePage(sessionId, dir)
+          const previousAssistantStillExists = page.messages.some(
+            message => message.info.id === latestUserUndoGuard.previousAssistantId,
+          )
+          if (!previousAssistantStillExists) {
+            await unrevertSession(sessionId, dir)
+            messageStore.setRevertState(sessionId, null)
+            await loadSessionRef.current(sessionId, { force: true })
+            sessionErrorHandler('undo', new Error('Undo would remove the previous assistant response; restored the session instead'))
+            return
+          }
+        }
 
         // 找到 revert 点的索引
         const revertIndex = state.messages.findIndex(m => m.info.id === userMessageId)
@@ -386,6 +421,24 @@ export function useSessionManager({ sessionId, directory, onLoadComplete, onErro
         }
         messageStore.setRevertState(sessionId, revertState)
       } catch (error) {
+        if (didRevertOnServer && latestUserUndoGuard) {
+          try {
+            await unrevertSession(sessionId, dir)
+            messageStore.setRevertState(sessionId, null)
+            await loadSessionRef.current(sessionId, { force: true })
+            sessionErrorHandler('undo', new Error('Undo verification failed; restored the session instead'))
+            return
+          } catch (restoreError) {
+            await loadSessionRef.current(sessionId, { force: true }).catch(() => undefined)
+            sessionErrorHandler(
+              'undo',
+              new Error(
+                `Undo verification failed and the session could not be restored: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+              ),
+            )
+            return
+          }
+        }
         sessionErrorHandler('undo', error)
       }
     },

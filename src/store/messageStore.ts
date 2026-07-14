@@ -791,6 +791,46 @@ class MessageStore {
     this.notify([data.sessionID])
   }
 
+  handleMessageRemoved(data: { messageID: string; sessionID: string }) {
+    const state = this.sessions.get(data.sessionID)
+    if (!state) return
+
+    const removedIndex = state.messages.findIndex(message => message.info.id === data.messageID)
+    if (removedIndex === -1) {
+      const shouldNotify =
+        state.pendingRevertState?.messageID === data.messageID || state.revertState?.messageId === data.messageID
+      if (!shouldNotify) return
+      if (state.pendingRevertState?.messageID === data.messageID) {
+        state.pendingRevertState = undefined
+      }
+      if (state.revertState?.messageId === data.messageID) {
+        state.revertState = null
+      }
+      this.dirtyMessagesBySession.get(data.sessionID)?.delete(data.messageID)
+      this.notify([data.sessionID])
+      return
+    }
+
+    const nextMessages =
+      state.revertState?.messageId === data.messageID
+        ? state.messages.slice(0, removedIndex)
+        : state.messages.filter(message => message.info.id !== data.messageID)
+
+    state.messages = nextMessages
+    if (state.pendingRevertState?.messageID === data.messageID) {
+      state.pendingRevertState = undefined
+    }
+    if (state.revertState && state.revertState.messageId !== data.messageID) {
+      const nextHistory = state.revertState.history.filter(item => item.messageId !== data.messageID)
+      state.revertState = nextHistory.length > 0 ? { ...state.revertState, history: nextHistory } : null
+    }
+    if (!state.messages.some(message => message.isStreaming)) {
+      state.isStreaming = false
+    }
+    this.dirtyMessagesBySession.get(data.sessionID)?.delete(data.messageID)
+    this.notify([data.sessionID])
+  }
+
   handleSessionIdle(sessionId: string) {
     const state = this.sessions.get(sessionId)
     if (!state) return

@@ -7,12 +7,18 @@ const {
   getSessionMock,
   getSessionMessagePageMock,
   getSessionMessagesMock,
+  revertMessageMock,
+  unrevertSessionMock,
+  extractUserMessageContentMock,
   messageStoreMock,
   sessionErrorHandlerMock,
 } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
   getSessionMessagePageMock: vi.fn(),
   getSessionMessagesMock: vi.fn(),
+  revertMessageMock: vi.fn(),
+  unrevertSessionMock: vi.fn(),
+  extractUserMessageContentMock: vi.fn(),
   messageStoreMock: {
     getSessionState: vi.fn(),
     setLoadState: vi.fn(),
@@ -35,9 +41,9 @@ vi.mock('../api', () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
   getSessionMessagePage: (...args: unknown[]) => getSessionMessagePageMock(...args),
   getSessionMessages: (...args: unknown[]) => getSessionMessagesMock(...args),
-  revertMessage: vi.fn(),
-  unrevertSession: vi.fn(),
-  extractUserMessageContent: vi.fn(),
+  revertMessage: (...args: unknown[]) => revertMessageMock(...args),
+  unrevertSession: (...args: unknown[]) => unrevertSessionMock(...args),
+  extractUserMessageContent: (...args: unknown[]) => extractUserMessageContentMock(...args),
 }))
 
 vi.mock('../store', () => ({
@@ -68,6 +74,20 @@ function createMessage(id: string, created: number) {
   }
 }
 
+function createUserMessage(id: string, created: number) {
+  return {
+    info: {
+      id,
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created },
+      agent: 'build',
+      model: { providerID: 'anthropic', modelID: 'claude' },
+    },
+    parts: [{ id: `part-${id}`, sessionID: 'session-1', messageID: id, type: 'text', text: id }],
+  }
+}
+
 describe('useSessionManager', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -78,6 +98,9 @@ describe('useSessionManager', () => {
     getSessionMock.mockReset()
     getSessionMessagePageMock.mockReset()
     getSessionMessagesMock.mockReset()
+    revertMessageMock.mockReset()
+    unrevertSessionMock.mockReset()
+    extractUserMessageContentMock.mockReset()
     messageStoreMock.getSessionState.mockReset()
     messageStoreMock.setLoadState.mockReset()
     messageStoreMock.setLoadError.mockReset()
@@ -99,6 +122,9 @@ describe('useSessionManager', () => {
     getSessionMock.mockResolvedValue({ id: 'session-1', directory: '/workspace/demo' })
     getSessionMessagePageMock.mockResolvedValue({ messages: [], nextCursor: undefined })
     getSessionMessagesMock.mockResolvedValue([])
+    revertMessageMock.mockResolvedValue({})
+    unrevertSessionMock.mockResolvedValue({})
+    extractUserMessageContentMock.mockReturnValue({ text: 'restored text', attachments: [] })
   })
 
   it('reports missing route sessions when loading returns not found', async () => {
@@ -847,6 +873,155 @@ describe('useSessionManager', () => {
     })
 
     expect(messageStoreMock.setLoadState).not.toHaveBeenCalledWith('session-1', 'loading')
+  })
+
+  it('keeps a latest user undo when the previous assistant survives on the server', async () => {
+    const previousAssistant = createMessage('assistant-1', 1)
+    const latestUser = createUserMessage('user-2', 2)
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [previousAssistant, latestUser],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      revertState: null,
+    })
+    getSessionMessagePageMock.mockResolvedValue({ messages: [previousAssistant], nextCursor: undefined })
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleUndo('user-2')
+    })
+
+    expect(revertMessageMock).toHaveBeenCalledWith('session-1', 'user-2', undefined, '/workspace/demo')
+    expect(unrevertSessionMock).not.toHaveBeenCalled()
+    expect(messageStoreMock.setRevertState).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ messageId: 'user-2' }),
+    )
+  })
+
+  it('restores the session when undoing the latest user would remove the previous assistant', async () => {
+    const previousAssistant = createMessage('assistant-1', 1)
+    const latestUser = createUserMessage('user-2', 2)
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [previousAssistant, latestUser],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'legacy',
+      revertState: null,
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock.mockResolvedValue({ messages: [], nextCursor: undefined })
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleUndo('user-2')
+    })
+
+    expect(unrevertSessionMock).toHaveBeenCalledWith('session-1', '/workspace/demo')
+    expect(messageStoreMock.setRevertState).toHaveBeenCalledWith('session-1', null)
+    expect(messageStoreMock.mergeMessages).toHaveBeenCalledWith('session-1', [], expect.objectContaining({ preserveHistory: true }))
+    expect(sessionErrorHandlerMock).toHaveBeenCalledWith(
+      'undo',
+      expect.objectContaining({ message: expect.stringContaining('previous assistant') }),
+    )
+  })
+
+  it('restores the session when latest user undo verification fails after server revert', async () => {
+    const previousAssistant = createMessage('assistant-1', 1)
+    const latestUser = createUserMessage('user-2', 2)
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [previousAssistant, latestUser],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'legacy',
+      revertState: null,
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock
+      .mockRejectedValueOnce(new Error('verification failed'))
+      .mockResolvedValueOnce({ messages: [previousAssistant], nextCursor: undefined })
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleUndo('user-2')
+    })
+
+    expect(unrevertSessionMock).toHaveBeenCalledWith('session-1', '/workspace/demo')
+    expect(messageStoreMock.setRevertState).toHaveBeenCalledWith('session-1', null)
+    expect(messageStoreMock.mergeMessages).toHaveBeenCalledWith(
+      'session-1',
+      [previousAssistant],
+      expect.objectContaining({ preserveHistory: true }),
+    )
+    expect(sessionErrorHandlerMock).toHaveBeenCalledWith(
+      'undo',
+      expect.objectContaining({ message: expect.stringContaining('verification failed') }),
+    )
+  })
+
+  it('reports restore failure when latest user undo verification fails and unrevert fails', async () => {
+    const previousAssistant = createMessage('assistant-1', 1)
+    const latestUser = createUserMessage('user-2', 2)
+    messageStoreMock.getSessionState.mockReturnValue({
+      messages: [previousAssistant, latestUser],
+      isStreaming: false,
+      isStale: false,
+      loadState: 'loaded',
+      directory: '/workspace/demo',
+      hasMoreHistory: false,
+      historyCursor: undefined,
+      paginationMode: 'legacy',
+      revertState: null,
+      localRevertGeneration: 0,
+    })
+    getSessionMessagePageMock
+      .mockRejectedValueOnce(new Error('verification failed'))
+      .mockResolvedValueOnce({ messages: [], nextCursor: undefined })
+    unrevertSessionMock.mockRejectedValue(new Error('restore failed'))
+
+    const { result } = renderHook(() =>
+      useSessionManager({
+        sessionId: 'session-1',
+        directory: '/workspace/demo',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.handleUndo('user-2')
+    })
+
+    expect(sessionErrorHandlerMock).toHaveBeenCalledWith(
+      'undo',
+      expect.objectContaining({ message: expect.stringContaining('could not be restored: restore failed') }),
+    )
   })
 
   it('merges a stale cached reload into previously loaded history without resetting pagination', async () => {

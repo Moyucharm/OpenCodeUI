@@ -688,6 +688,9 @@ function handleEventForSubscriber(payload: GlobalEvent['payload'], callbacks: Ev
       if (message) callbacks.onMessageUpdated?.(message)
       break
     }
+    case EventTypes.MESSAGE_REMOVED:
+      callbacks.onMessageRemoved?.(payload.properties)
+      break
     case EventTypes.MESSAGE_PART_UPDATED: {
       callbacks.onPartUpdated?.(payload.properties.part)
       break
