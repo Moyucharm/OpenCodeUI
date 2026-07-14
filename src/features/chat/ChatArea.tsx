@@ -2,8 +2,8 @@
 // ChatArea - 聊天消息显示区域
 // ============================================
 //
-// 这版改成页块级虚拟化：
-// - 消息按页分块，不再按 message 逐条虚拟
+// 这版使用粗颗粒页块级虚拟化：
+// - 消息以 20 条为主分块，渲染重量只限制极端页面
 // - 视口附近少量页保持真实 DOM
 // - 远页折叠成固定高度块，优先使用实测高度，未测量时使用保守估算
 //
@@ -40,25 +40,29 @@ import {
   buildPageOffsets,
   buildPageRenderSegments,
   computeAnchorRestoreScrollDelta,
-  shouldRestoreLoadMoreAnchor,
   buildTurnDurationMap,
   computeExpandedPageRange,
   expandSelectionWithPageKeys,
+  PAGE_ADJACENT_OVERSCAN,
   seedMeasuredPageHeightsFromPreviousPages,
   type ChatPage,
   type StableChatPage,
 } from './chatPageModel'
 
 const LOAD_MORE_ROOT_MARGIN = '240px 0px 0px 0px'
+const LOAD_MORE_ANCHOR_CAPTURE_PX = 480
 const LOAD_MORE_WHEEL_COOLDOWN_MS = 90
 const LOAD_MORE_DEFER_MS = 100
+const LOAD_MORE_ANCHOR_SETTLE_MS = 600
+const LOAD_MORE_ANCHOR_FALLBACK_MS = 5000
 const PENDING_SCROLL_TARGET_KEEPALIVE_MS = 900
-const PENDING_LAYOUT_ANCHOR_TIMEOUT_MS = 300
+const ADJACENT_PAGE_PRELOAD_VIEWPORTS = 12
 
 type LoadMoreAnchorSnapshot = {
   messageId: string
+  sourceId: string
   topOffset: number
-  pageMessageSignatureBefore: string
+  bottomOffset: number
 }
 
 /** Stable no-op to avoid creating a new closure on every render. */
@@ -76,24 +80,42 @@ function pageHasUserMessage(page: ChatPage): boolean {
   return page.rows.some(row => row.messages.some(message => message.info.role === 'user'))
 }
 
-function captureLoadMoreAnchor(root: HTMLElement, pageMessageSignatureBefore = ''): LoadMoreAnchorSnapshot | null {
+function captureLoadMoreAnchor(root: HTMLElement): LoadMoreAnchorSnapshot | null {
   const rootRect = root.getBoundingClientRect()
   const candidates = root.querySelectorAll<HTMLElement>('[data-message-id]')
 
   let best: LoadMoreAnchorSnapshot | null = null
+  let bestVisibleHeight = 0
   for (const element of candidates) {
     const messageId = element.getAttribute('data-message-id')
     if (!messageId) continue
+    const sourceId = element.getAttribute('data-anchor-source-id') || messageId
 
     const rect = element.getBoundingClientRect()
     const intersectsViewport = rect.bottom > rootRect.top && rect.top < rootRect.bottom
     if (!intersectsViewport) continue
 
     const topOffset = rect.top - rootRect.top
-    if (!best || topOffset < best.topOffset) best = { messageId, topOffset, pageMessageSignatureBefore }
+    const visibleHeight = Math.min(rect.bottom, rootRect.bottom) - Math.max(rect.top, rootRect.top)
+    if (
+      visibleHeight > bestVisibleHeight ||
+      (visibleHeight === bestVisibleHeight && (!best || topOffset < best.topOffset))
+    ) {
+      best = { messageId, sourceId, topOffset, bottomOffset: rect.bottom - rootRect.top }
+      bestVisibleHeight = visibleHeight
+    }
   }
 
   return best
+}
+
+function findLoadMoreAnchorTarget(root: HTMLElement, anchor: LoadMoreAnchorSnapshot): HTMLElement | null {
+  const direct = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
+  if (direct) return direct
+  for (const element of root.querySelectorAll<HTMLElement>('[data-anchor-source-id]')) {
+    if (element.getAttribute('data-anchor-source-id') === anchor.sourceId) return element
+  }
+  return null
 }
 
 interface ChatAreaProps {
@@ -177,27 +199,24 @@ export const ChatArea = memo(
       const [scrollOffsetFromBottom, setScrollOffsetFromBottom] = useState(0)
       const [viewportHeight, setViewportHeight] = useState(0)
       const [measuredPageHeights, setMeasuredPageHeights] = useState<Record<string, number>>({})
-      const measuredPageHeightsRef = useRef(measuredPageHeights)
       const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null)
-      const [pendingLoadMoreAnchorMessageId, setPendingLoadMoreAnchorMessageId] = useState<string | null>(null)
-      const [pendingLayoutAnchorMessageId, setPendingLayoutAnchorMessageId] = useState<string | null>(null)
+      const [pendingLoadMoreAnchorSourceId, setPendingLoadMoreAnchorSourceId] = useState<string | null>(null)
       const scrollSnapshotRafRef = useRef<number | null>(null)
       const pendingLoadMoreAnchorRef = useRef<LoadMoreAnchorSnapshot | null>(null)
+      const loadMoreIntentAnchorRef = useRef<LoadMoreAnchorSnapshot | null>(null)
+      const loadMoreRequestCompletedRef = useRef(false)
       const pendingLayoutAnchorRef = useRef<LoadMoreAnchorSnapshot | null>(null)
       const pendingLoadMoreTimerRef = useRef<number | null>(null)
+      const pendingAnchorReleaseTimerRef = useRef<number | null>(null)
       const pendingScrollClearTimerRef = useRef<number | null>(null)
       const pendingAnchorClearRafRef = useRef<number | null>(null)
       const pendingSessionResetRafRef = useRef<number | null>(null)
-      // rAF 批处理高度更新：同帧内多次 ResizeObserver 回调合并为一次 setState
-      const pendingHeightUpdatesRef = useRef<Map<string, number>>(new Map())
-      const heightFlushRafRef = useRef<number | null>(null)
-      const pendingLayoutAnchorClearTimerRef = useRef<number | null>(null)
-      const pendingLayoutAnchorClearRafRef = useRef<number | null>(null)
       const lastScrollRootSizeRef = useRef({ width: 0, height: 0 })
       const previousActivePagesRef = useRef<{ sessionId?: string | null; pages: StableChatPage[] }>({ pages: [] })
-      const lastStreamingPageKeysRef = useRef<ReadonlySet<string>>(new Set())
       const settlingScrollMessageIdRef = useRef<string | null>(null)
       const loadMoreRequestIdRef = useRef(0)
+      const loadMorePagesBeforeRef = useRef<StableChatPage[] | null>(null)
+      const isMountedRef = useRef(true)
       const topSentinelVisibleRef = useRef(false)
       const lastWheelInputAtRef = useRef(0)
       const tryLoadMoreRef = useRef<() => void>(NOOP)
@@ -238,10 +257,6 @@ export const ChatArea = memo(
       )
 
       const activePages = pageRecords ?? pages
-      const activePageMessageSignature = useMemo(
-        () => activePages.map(page => page.messageIds.join(',')).join('|'),
-        [activePages],
-      )
 
       useLayoutEffect(() => {
         const previous = previousActivePagesRef.current
@@ -255,7 +270,6 @@ export const ChatArea = memo(
             measuredPageHeights: current,
           })
           if (seeded === current) return current
-          measuredPageHeightsRef.current = seeded
           return seeded
         })
       }, [activePages, sessionId])
@@ -270,18 +284,14 @@ export const ChatArea = memo(
 
       const pendingLoadMoreAnchorPageIndex = useMemo(
         () =>
-          pendingLoadMoreAnchorMessageId == null
+          pendingLoadMoreAnchorSourceId == null
             ? -1
-            : activePages.findIndex(page => page.messageIds.includes(pendingLoadMoreAnchorMessageId)),
-        [activePages, pendingLoadMoreAnchorMessageId],
-      )
-
-      const pendingLayoutAnchorPageIndex = useMemo(
-        () =>
-          pendingLayoutAnchorMessageId == null
-            ? -1
-            : activePages.findIndex(page => page.messageIds.includes(pendingLayoutAnchorMessageId)),
-        [activePages, pendingLayoutAnchorMessageId],
+            : activePages.findIndex(page =>
+                page.messageIds.some(
+                  messageId => (localForkTargetIdMap.get(messageId) ?? messageId) === pendingLoadMoreAnchorSourceId,
+                ),
+              ),
+        [activePages, localForkTargetIdMap, pendingLoadMoreAnchorSourceId],
       )
 
       const expandedPageRange = useMemo(
@@ -291,18 +301,15 @@ export const ChatArea = memo(
             measuredPageHeights,
             scrollOffsetFromBottom,
             viewportHeight,
+            adjacentPageCount: PAGE_ADJACENT_OVERSCAN,
+            adjacentPageMaxSourceHeight: viewportHeight * ADJACENT_PAGE_PRELOAD_VIEWPORTS,
           }),
         [activePages, measuredPageHeights, scrollOffsetFromBottom, viewportHeight],
       )
 
       const expandedPageSelection = useMemo(
-        () =>
-          buildExpandedPageSelection(expandedPageRange, [
-            pendingTargetPageIndex,
-            pendingLoadMoreAnchorPageIndex,
-            pendingLayoutAnchorPageIndex,
-          ]),
-        [expandedPageRange, pendingLayoutAnchorPageIndex, pendingLoadMoreAnchorPageIndex, pendingTargetPageIndex],
+        () => buildExpandedPageSelection(expandedPageRange, [pendingTargetPageIndex, pendingLoadMoreAnchorPageIndex]),
+        [expandedPageRange, pendingLoadMoreAnchorPageIndex, pendingTargetPageIndex],
       )
 
       const streamingPageKeys = useMemo(() => {
@@ -312,10 +319,6 @@ export const ChatArea = memo(
         }
         return keys
       }, [activePages])
-
-      useLayoutEffect(() => {
-        lastStreamingPageKeysRef.current = streamingPageKeys
-      }, [streamingPageKeys])
 
       const renderPageSelection = useMemo(
         () =>
@@ -337,18 +340,6 @@ export const ChatArea = memo(
         [activePages, measuredPageHeights, renderPageSelection],
       )
 
-      // 稳定签名：仅在实际展示的消息集合变化时才变。
-      // 流式期间页面结构不变（相同页面、相同消息 ID），签名保持稳定，
-      // 避免 IntersectionObserver effect 每 token 重订阅。
-      const domMessageSignature = useMemo(() => {
-        const parts: string[] = []
-        for (const pageIndex of renderPageSelection) {
-          const page = activePages[pageIndex]
-          if (page) parts.push(page.messageIds.join(','))
-        }
-        return parts.join('|')
-      }, [renderPageSelection, activePages])
-
       const clearPendingLoadMoreTimer = useCallback(() => {
         if (pendingLoadMoreTimerRef.current === null) return
         window.clearTimeout(pendingLoadMoreTimerRef.current)
@@ -361,59 +352,63 @@ export const ChatArea = memo(
         pendingScrollClearTimerRef.current = null
       }, [])
 
+      const clearPendingAnchorReleaseTimer = useCallback(() => {
+        if (pendingAnchorReleaseTimerRef.current === null) return
+        window.clearTimeout(pendingAnchorReleaseTimerRef.current)
+        pendingAnchorReleaseTimerRef.current = null
+      }, [])
+
       const clearPendingLoadMoreAnchorMessage = useCallback(() => {
         if (pendingAnchorClearRafRef.current !== null) cancelAnimationFrame(pendingAnchorClearRafRef.current)
         pendingAnchorClearRafRef.current = requestAnimationFrame(() => {
           pendingAnchorClearRafRef.current = null
-          setPendingLoadMoreAnchorMessageId(null)
+          setPendingLoadMoreAnchorSourceId(null)
         })
       }, [])
 
-      const clearPendingLayoutAnchorMessage = useCallback(() => {
-        if (pendingLayoutAnchorClearRafRef.current !== null) cancelAnimationFrame(pendingLayoutAnchorClearRafRef.current)
-        pendingLayoutAnchorClearRafRef.current = requestAnimationFrame(() => {
-          pendingLayoutAnchorClearRafRef.current = null
-          setPendingLayoutAnchorMessageId(null)
-        })
-      }, [])
+      const releasePendingLoadMoreAnchor = useCallback(() => {
+        clearPendingAnchorReleaseTimer()
+        pendingLoadMoreAnchorRef.current = null
+        loadMoreRequestCompletedRef.current = false
+        clearPendingLoadMoreAnchorMessage()
+      }, [clearPendingAnchorReleaseTimer, clearPendingLoadMoreAnchorMessage])
+
+      const schedulePendingLoadMoreAnchorRelease = useCallback(
+        (delay: number) => {
+          clearPendingAnchorReleaseTimer()
+          pendingAnchorReleaseTimerRef.current = window.setTimeout(() => {
+            pendingAnchorReleaseTimerRef.current = null
+            pendingLoadMoreAnchorRef.current = null
+            loadMoreRequestCompletedRef.current = false
+            clearPendingLoadMoreAnchorMessage()
+          }, delay)
+        },
+        [clearPendingAnchorReleaseTimer, clearPendingLoadMoreAnchorMessage],
+      )
 
       const resetSessionViewState = useCallback(() => {
         if (pendingSessionResetRafRef.current !== null) cancelAnimationFrame(pendingSessionResetRafRef.current)
         pendingSessionResetRafRef.current = requestAnimationFrame(() => {
           pendingSessionResetRafRef.current = null
           setIsLoadingMore(false)
-          measuredPageHeightsRef.current = {}
           setMeasuredPageHeights({})
           setPendingScrollMessageId(null)
-          if (pendingLayoutAnchorClearTimerRef.current !== null) {
-            window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
-            pendingLayoutAnchorClearTimerRef.current = null
-          }
-          if (pendingLayoutAnchorClearRafRef.current !== null) {
-            cancelAnimationFrame(pendingLayoutAnchorClearRafRef.current)
-            pendingLayoutAnchorClearRafRef.current = null
-          }
-          pendingLayoutAnchorRef.current = null
-          setPendingLayoutAnchorMessageId(null)
         })
       }, [])
 
       useEffect(() => {
+        isMountedRef.current = true
         return () => {
+          isMountedRef.current = false
+          loadMoreRequestIdRef.current += 1
           clearPendingLoadMoreTimer()
           clearPendingScrollTimer()
+          clearPendingAnchorReleaseTimer()
           if (scrollSnapshotRafRef.current !== null) cancelAnimationFrame(scrollSnapshotRafRef.current)
           if (pendingAnchorClearRafRef.current !== null) cancelAnimationFrame(pendingAnchorClearRafRef.current)
           if (pendingSessionResetRafRef.current !== null) cancelAnimationFrame(pendingSessionResetRafRef.current)
-          if (heightFlushRafRef.current !== null) cancelAnimationFrame(heightFlushRafRef.current)
-          if (pendingLayoutAnchorClearTimerRef.current !== null) {
-            window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
-          }
-          if (pendingLayoutAnchorClearRafRef.current !== null) {
-            cancelAnimationFrame(pendingLayoutAnchorClearRafRef.current)
-          }
         }
-      }, [clearPendingLoadMoreTimer, clearPendingScrollTimer])
+      }, [clearPendingAnchorReleaseTimer, clearPendingLoadMoreTimer, clearPendingScrollTimer])
 
       const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
         scrollRef.current = node
@@ -466,27 +461,111 @@ export const ChatArea = memo(
         const onScroll = () => {
           const hasOverflow = root.scrollHeight > root.clientHeight + 1
           const distFromBottom = Math.abs(root.scrollTop)
+          const distFromTop = Math.max(0, root.scrollHeight - root.clientHeight - distFromBottom)
           const atBottom = !hasOverflow || distFromBottom <= atBottomThreshold
           const previous = isAtBottomRef.current
           isAtBottomRef.current = atBottom
           if (previous !== atBottom) onAtBottomChange?.(atBottom)
 
-          if (!atBottom) loadMoreBlockedRef.current = false
+          if (
+            loadMoreIntentAnchorRef.current === null &&
+            Date.now() - lastWheelInputAtRef.current < LOAD_MORE_WHEEL_COOLDOWN_MS + LOAD_MORE_DEFER_MS &&
+            distFromTop <= LOAD_MORE_ANCHOR_CAPTURE_PX
+          ) {
+            loadMoreIntentAnchorRef.current = captureLoadMoreAnchor(root)
+          }
+
           updateScrollOffsetSnapshot()
         }
 
-        const onWheel = () => {
+        const onOlderScrollIntent = () => {
           lastWheelInputAtRef.current = Date.now()
+          if (pendingLoadMoreAnchorRef.current && !isLoadingRef.current) {
+            releasePendingLoadMoreAnchor()
+          }
+          const distFromTop = Math.max(0, root.scrollHeight - root.clientHeight - Math.abs(root.scrollTop))
+          loadMoreIntentAnchorRef.current = distFromTop <= 1 ? captureLoadMoreAnchor(root) : null
+          loadMoreBlockedRef.current = false
+          tryLoadMoreRef.current()
+        }
+
+        const onWheel = (event: WheelEvent) => {
+          if (event.deltaY > 0) {
+            releasePendingLoadMoreAnchor()
+            return
+          }
+          onOlderScrollIntent()
+        }
+
+        const onKeyDown = (event: KeyboardEvent) => {
+          const activeElement = document.activeElement
+          const focusedScrollRoot =
+            activeElement instanceof Element ? activeElement.closest('[data-chat-scroll-root]') : null
+          if (focusedScrollRoot ? focusedScrollRoot !== root : !root.matches(':hover')) return
+          const target = event.target
+          if (
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLTextAreaElement ||
+            (target instanceof HTMLElement && target.isContentEditable)
+          ) {
+            return
+          }
+          if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+            onOlderScrollIntent()
+          } else if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'End') {
+            releasePendingLoadMoreAnchor()
+          }
+        }
+
+        let touchStartOffset: number | null = null
+        let scrollbarStartOffset: number | null = null
+
+        const onTouchStart = () => {
+          touchStartOffset = Math.abs(root.scrollTop)
+        }
+
+        const onTouchEnd = () => {
+          if (touchStartOffset === null) return
+          const startOffset = touchStartOffset
+          touchStartOffset = null
+          const nextOffset = Math.abs(root.scrollTop)
+          if (nextOffset > startOffset + 1) onOlderScrollIntent()
+          else if (nextOffset < startOffset - 1) releasePendingLoadMoreAnchor()
+          else if (root.scrollHeight - root.clientHeight - nextOffset <= 1) onOlderScrollIntent()
+        }
+
+        const onPointerDown = (event: PointerEvent) => {
+          const rect = root.getBoundingClientRect()
+          if (event.clientX >= rect.right - 24) scrollbarStartOffset = Math.abs(root.scrollTop)
+        }
+
+        const onPointerUp = () => {
+          if (scrollbarStartOffset === null) return
+          const startOffset = scrollbarStartOffset
+          scrollbarStartOffset = null
+          const nextOffset = Math.abs(root.scrollTop)
+          if (nextOffset > startOffset + 1) onOlderScrollIntent()
+          else if (nextOffset < startOffset - 1) releasePendingLoadMoreAnchor()
         }
 
         root.addEventListener('scroll', onScroll, { passive: true })
         root.addEventListener('wheel', onWheel, { passive: true })
+        root.addEventListener('touchstart', onTouchStart, { passive: true })
+        root.addEventListener('touchend', onTouchEnd, { passive: true })
+        root.addEventListener('pointerdown', onPointerDown, { passive: true })
+        window.addEventListener('pointerup', onPointerUp, { passive: true })
+        window.addEventListener('keydown', onKeyDown)
         updateScrollOffsetSnapshot()
         return () => {
           root.removeEventListener('scroll', onScroll)
           root.removeEventListener('wheel', onWheel)
+          root.removeEventListener('touchstart', onTouchStart)
+          root.removeEventListener('touchend', onTouchEnd)
+          root.removeEventListener('pointerdown', onPointerDown)
+          window.removeEventListener('pointerup', onPointerUp)
+          window.removeEventListener('keydown', onKeyDown)
         }
-      }, [atBottomThreshold, onAtBottomChange, updateScrollOffsetSnapshot])
+      }, [atBottomThreshold, onAtBottomChange, releasePendingLoadMoreAnchor, updateScrollOffsetSnapshot])
 
       const prevSessionIdRef = useRef(sessionId)
       useEffect(() => {
@@ -495,13 +574,16 @@ export const ChatArea = memo(
         isAtBottomRef.current = true
         loadMoreBlockedRef.current = true
         pendingLoadMoreAnchorRef.current = null
+        loadMoreIntentAnchorRef.current = null
+        loadMoreRequestCompletedRef.current = false
+        loadMorePagesBeforeRef.current = null
         previousActivePagesRef.current = { sessionId, pages: [] }
-        lastStreamingPageKeysRef.current = new Set()
         clearPendingLoadMoreAnchorMessage()
         topSentinelVisibleRef.current = false
         loadMoreRequestIdRef.current += 1
         isLoadingRef.current = false
         clearPendingLoadMoreTimer()
+        clearPendingAnchorReleaseTimer()
         settlingScrollMessageIdRef.current = null
         clearPendingScrollTimer()
         resetSessionViewState()
@@ -519,6 +601,7 @@ export const ChatArea = memo(
         clearPendingLoadMoreTimer,
         clearPendingLoadMoreAnchorMessage,
         clearPendingScrollTimer,
+        clearPendingAnchorReleaseTimer,
         onAtBottomChange,
         onVisibleMessageIdsChange,
         resetSessionViewState,
@@ -541,6 +624,11 @@ export const ChatArea = memo(
       const startLoadMore = useCallback((allowRetry = false) => {
         if (isLoadingRef.current) return
 
+        const root = scrollRef.current
+        if (!root) return
+        const distFromTop = Math.max(0, root.scrollHeight - root.clientHeight - Math.abs(root.scrollTop))
+        if (distFromTop > LOAD_MORE_ANCHOR_CAPTURE_PX) return
+
         const fn = loadMoreRef.current
         if (!fn) return
 
@@ -551,23 +639,42 @@ export const ChatArea = memo(
           if (!hasMore) return
         }
 
-        const root = scrollRef.current
-        if (root) {
-          const anchor = captureLoadMoreAnchor(root, activePageMessageSignature)
-          pendingLoadMoreAnchorRef.current = anchor
-          setPendingLoadMoreAnchorMessageId(anchor?.messageId ?? null)
+        clearPendingAnchorReleaseTimer()
+        const anchor = loadMoreIntentAnchorRef.current ?? captureLoadMoreAnchor(root)
+        loadMoreIntentAnchorRef.current = null
+        pendingLoadMoreAnchorRef.current = anchor
+        loadMorePagesBeforeRef.current = activePages
+        if (pendingAnchorClearRafRef.current !== null) {
+          cancelAnimationFrame(pendingAnchorClearRafRef.current)
+          pendingAnchorClearRafRef.current = null
         }
+        setPendingLoadMoreAnchorSourceId(anchor?.sourceId ?? null)
 
+        loadMoreBlockedRef.current = true
+        loadMoreRequestCompletedRef.current = false
         const requestId = ++loadMoreRequestIdRef.current
         const requestSessionId = sid
         isLoadingRef.current = true
         setIsLoadingMore(true)
         Promise.resolve(fn()).finally(() => {
-          if (loadMoreRequestIdRef.current !== requestId || sessionId !== requestSessionId) return
+          if (!isMountedRef.current || loadMoreRequestIdRef.current !== requestId || sessionId !== requestSessionId) {
+            return
+          }
           isLoadingRef.current = false
           setIsLoadingMore(false)
+          if (!pendingLoadMoreAnchorRef.current) {
+            loadMoreRequestCompletedRef.current = false
+            return
+          }
+          loadMoreRequestCompletedRef.current = true
+          schedulePendingLoadMoreAnchorRelease(LOAD_MORE_ANCHOR_FALLBACK_MS)
         })
-      }, [activePageMessageSignature, sessionId])
+      }, [
+        activePages,
+        clearPendingAnchorReleaseTimer,
+        schedulePendingLoadMoreAnchorRelease,
+        sessionId,
+      ])
 
       const tryLoadMore = useCallback(() => {
         if (!topSentinelVisibleRef.current || loadMoreBlockedRef.current) return
@@ -622,30 +729,27 @@ export const ChatArea = memo(
         const anchor = pendingLoadMoreAnchorRef.current
         const root = scrollRef.current
         if (!anchor || !root) return
-        if (
-          !shouldRestoreLoadMoreAnchor(
-            anchor?.messageId ?? null,
-            activePages,
-            activePageMessageSignature !== anchor.pageMessageSignatureBefore,
-          )
-        ) {
-          return
-        }
-
-        const target = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
+        const target = findLoadMoreAnchorTarget(root, anchor)
         if (!target) return
 
-        pendingLoadMoreAnchorRef.current = null
-        clearPendingLoadMoreAnchorMessage()
-
         const rootRect = root.getBoundingClientRect()
-        const nextTopOffset = target.getBoundingClientRect().top - rootRect.top
-        const delta = computeAnchorRestoreScrollDelta(anchor.topOffset, nextTopOffset)
+        const nextBottomOffset = target.getBoundingClientRect().bottom - rootRect.top
+        const delta = computeAnchorRestoreScrollDelta(anchor.bottomOffset, nextBottomOffset)
         if (Math.abs(delta) >= 1) {
           root.scrollTop += delta
           updateScrollOffsetSnapshot()
         }
-      }, [activePageMessageSignature, activePages, clearPendingLoadMoreAnchorMessage, updateScrollOffsetSnapshot])
+        if (loadMoreRequestCompletedRef.current && activePages !== loadMorePagesBeforeRef.current) {
+          schedulePendingLoadMoreAnchorRelease(LOAD_MORE_ANCHOR_SETTLE_MS)
+        }
+      }, [
+        activePages,
+        isLoadingMore,
+        measuredPageHeights,
+        renderSegments,
+        schedulePendingLoadMoreAnchorRelease,
+        updateScrollOffsetSnapshot,
+      ])
 
       useLayoutEffect(() => {
         const anchor = pendingLayoutAnchorRef.current
@@ -653,13 +757,8 @@ export const ChatArea = memo(
         if (!anchor || !root) return
 
         const target = root.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"]`)
-        if (!target) return
-
         pendingLayoutAnchorRef.current = null
-        if (pendingLayoutAnchorClearTimerRef.current !== null) {
-          window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
-          pendingLayoutAnchorClearTimerRef.current = null
-        }
+        if (!target) return
 
         const rootRect = root.getBoundingClientRect()
         const nextTopOffset = target.getBoundingClientRect().top - rootRect.top
@@ -668,8 +767,7 @@ export const ChatArea = memo(
           root.scrollTop += delta
           updateScrollOffsetSnapshot()
         }
-        clearPendingLayoutAnchorMessage()
-      }, [activePages, measuredPageHeights, renderSegments, updateScrollOffsetSnapshot, clearPendingLayoutAnchorMessage])
+      }, [activePages, measuredPageHeights, renderSegments, updateScrollOffsetSnapshot])
 
       const onVisibleIdsChangeRef = useRef(onVisibleMessageIdsChange)
       useEffect(() => {
@@ -706,7 +804,7 @@ export const ChatArea = memo(
         elements.forEach(element => observer.observe(element))
 
         return () => observer.disconnect()
-      }, [domMessageSignature, expandedPageRange.endIndex, expandedPageRange.startIndex])
+      }, [activePages, expandedPageRange.endIndex, expandedPageRange.startIndex])
 
       useEffect(() => {
         if (!pendingScrollMessageId) return
@@ -733,62 +831,15 @@ export const ChatArea = memo(
 
       const updateMeasuredPageHeight = useCallback((pageKey: string, nextHeight: number) => {
         if (nextHeight <= 0) return
-        // 入队而非立即 setState——同帧内多个 ResizeObserver 回调
-        // 会合并为一次 setMeasuredPageHeights，避免每 token 级联重渲染
-        pendingHeightUpdatesRef.current.set(pageKey, nextHeight)
-
-        if (heightFlushRafRef.current !== null) return
-        heightFlushRafRef.current = requestAnimationFrame(() => {
-          heightFlushRafRef.current = null
-          const pending = pendingHeightUpdatesRef.current
-          pendingHeightUpdatesRef.current = new Map()
-          if (pending.size === 0) return
-
+        setMeasuredPageHeights(previous => {
+          const current = previous[pageKey] ?? null
+          if (current !== null && Math.abs(current - nextHeight) < 1) return previous
           const root = scrollRef.current
-          // anchor 捕获在 setState 前，读旧 ref 判断高度是否真变了
-          if (root && !isAtBottomRef.current) {
-            let needsAnchor = false
-            for (const [key, height] of pending) {
-              const current = measuredPageHeightsRef.current[key] ?? null
-              if (current === null || Math.abs(current - height) >= 1) {
-                needsAnchor = true
-                break
-              }
-            }
-            if (needsAnchor) {
-              const anchor = captureLoadMoreAnchor(root)
-              if (anchor) {
-                pendingLayoutAnchorRef.current = anchor
-                setPendingLayoutAnchorMessageId(anchor.messageId)
-                if (pendingLayoutAnchorClearTimerRef.current !== null) {
-                  window.clearTimeout(pendingLayoutAnchorClearTimerRef.current)
-                }
-                pendingLayoutAnchorClearTimerRef.current = window.setTimeout(() => {
-                  pendingLayoutAnchorClearTimerRef.current = null
-                  pendingLayoutAnchorRef.current = null
-                  setPendingLayoutAnchorMessageId(null)
-                }, PENDING_LAYOUT_ANCHOR_TIMEOUT_MS)
-              }
-            }
+          if (root && !isAtBottomRef.current && current !== null && Math.abs(current - nextHeight) >= 1) {
+            pendingLayoutAnchorRef.current = captureLoadMoreAnchor(root)
           }
-
-          setMeasuredPageHeights(previous => {
-            let next = previous
-            let changed = false
-            for (const [key, height] of pending) {
-              const current = next[key] ?? null
-              if (current !== null && Math.abs(current - height) < 1) continue
-              if (!changed) {
-                next = { ...previous }
-                changed = true
-              }
-              next[key] = height
-            }
-            if (changed) {
-              measuredPageHeightsRef.current = next
-            }
-            return changed ? next : previous
-          })
+          const next = { ...previous, [pageKey]: nextHeight }
+          return next
         })
       }, [])
 
@@ -1104,20 +1155,28 @@ const PageBlock = memo(function PageBlock({
   const wrapperRef = usePageHeightMeasurement(page.key, onMeasuredHeightChange, isStreamingPage)
 
   return (
-    <div ref={wrapperRef} className="shrink-0 contain-content" data-page-key={page.key}>
+    <div ref={wrapperRef} className="shrink-0" data-page-key={page.key}>
       {page.rows.map(row => {
         const isUser = row.messages[0].info.role === 'user'
+        const verticalPaddingClass = row.continuesFromPrevious
+          ? row.continuesToNext
+            ? 'pt-2 pb-0'
+            : 'pt-2 pb-3'
+          : row.continuesToNext
+            ? 'pt-3 pb-0'
+            : 'py-3'
         return (
           <div
             key={row.key}
-            className={`w-full ${messageMaxWidthClass} mx-auto ${messagePaddingClass} py-3 transition-[max-width] duration-300 ease-in-out`}
+            className={`w-full ${messageMaxWidthClass} mx-auto ${messagePaddingClass} ${verticalPaddingClass} transition-[max-width] duration-300 ease-in-out`}
           >
             <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-              <div className={`min-w-0 group ${!isUser ? 'w-full' : ''} flex flex-col gap-2`}>
+              <div className={`message-renderer-shell min-w-0 group ${!isUser ? 'w-full' : ''} flex flex-col gap-2`}>
                 {row.messages.map(message => (
                   <RenderedMessageItem
                     key={message.info.id}
                     messageId={message.info.id}
+                    anchorSourceId={forkTargetIdMap.get(message.info.id) ?? message.info.id}
                     registerMessage={registerMessage}
                   >
                     <MessageRenderer
@@ -1147,12 +1206,14 @@ const CollapsedPagesBlock = memo(function CollapsedPagesBlock({ height }: { heig
 
 interface RenderedMessageItemProps {
   messageId: string
+  anchorSourceId: string
   registerMessage?: (id: string, element: HTMLElement | null) => void
   children: ReactNode
 }
 
 const RenderedMessageItem = memo(function RenderedMessageItem({
   messageId,
+  anchorSourceId,
   registerMessage,
   children,
 }: RenderedMessageItemProps) {
@@ -1164,7 +1225,7 @@ const RenderedMessageItem = memo(function RenderedMessageItem({
   )
 
   return (
-    <div ref={setElement} data-message-id={messageId}>
+    <div ref={setElement} data-message-id={messageId} data-anchor-source-id={anchorSourceId}>
       {children}
     </div>
   )

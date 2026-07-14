@@ -122,10 +122,7 @@ export const ToolPartView = memo(function ToolPartView({
     permissionResolved ||
     (immersiveMode && descriptive && isStreaming && isReadable)
 
-  const [expanded, setExpanded] = useUiDisclosureState(
-    `message:${part.messageID}:tool:${part.id}`,
-    shouldStartExpanded,
-  )
+  const [expanded, setExpanded] = useUiDisclosureState(`message:${part.messageID}:tool:${part.id}`, shouldStartExpanded)
   const hasAutoExpandedReadableRef = useRef(shouldStartExpanded && immersiveMode && descriptive && isReadable)
   const [isChildFullscreen, setIsChildFullscreen] = useState(false)
   const effectiveExpanded = expanded || hasPendingInteraction || permissionResolved || isChildFullscreen

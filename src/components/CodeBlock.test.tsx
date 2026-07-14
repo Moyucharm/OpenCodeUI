@@ -97,6 +97,22 @@ describe('CodeBlock', () => {
     expect(screen.getByText('ts')).toBeInTheDocument()
   })
 
+  it('composes a preview action into the existing code block chrome', () => {
+    const { container } = render(
+      <CodeBlock
+        code="<button>Run</button>"
+        language="html"
+        headerActions={<button aria-label="Preview HTML">preview</button>}
+      />,
+    )
+
+    const shell = container.firstElementChild
+    expect(shell).toContainElement(screen.getByText('html'))
+    expect(shell).toContainElement(screen.getByRole('button', { name: 'Preview HTML' }))
+    expect(shell).toContainElement(screen.getByRole('button', { name: 'Copy to clipboard' }))
+    expect(container.querySelector('pre')).toBeInTheDocument()
+  })
+
   it('renders current plain code while highlight is deferred', () => {
     render(<CodeBlock code="const value = 1" language="ts" deferHighlight />)
 
@@ -173,6 +189,21 @@ describe('CodeBlock', () => {
       'const value = 1',
       expect.objectContaining({ enabled: true, lang: 'ts' }),
     )
+  })
+
+  it('reuses stable streaming token DOM while appending suffix text', () => {
+    useStreamingSyntaxHighlightMock.mockImplementation((code: string): HighlightMockOutput => ({
+      highlightedCode: code.startsWith('const') ? 'const' : code,
+      output: [[{ content: 'const', color: '#fff' }]],
+    }))
+
+    const { container, rerender } = render(<CodeBlock code="const" language="ts" forceHighlight streamingHighlight />)
+    const firstSpan = container.querySelector('code span')
+
+    rerender(<CodeBlock code="const value" language="ts" forceHighlight streamingHighlight />)
+
+    expect(container.querySelector('code span')).toBe(firstSpan)
+    expect(container.querySelector('pre')).toHaveTextContent('const value')
   })
 
   it('keeps the live suffix when streaming tokens lag behind code', () => {

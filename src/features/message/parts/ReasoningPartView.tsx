@@ -75,7 +75,7 @@ export const ReasoningPartView = memo(function ReasoningPartView({ part, isStrea
       if (timerId !== null) window.clearTimeout(timerId)
       if (frameId !== null) cancelAnimationFrame(frameId)
     }
-  }, [isPartStreaming, hasContent, setExpanded])
+  }, [hasContent, isPartStreaming, setExpanded])
 
   useEffect(() => {
     if (reasoningDisplayMode !== 'capsule') return

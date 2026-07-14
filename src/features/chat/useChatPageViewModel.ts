@@ -7,9 +7,8 @@ import {
   type VisibleMessageEntry,
 } from './chatAreaVisibility'
 import {
-  buildContentKeyedChatPages,
-  findMessageSequenceOffset,
   buildTurnDurationMap,
+  reconcileStableChatPages,
   type MessageGroupRow,
   type StableChatPage,
 } from './chatPageModel'
@@ -126,6 +125,8 @@ function sameRow(a: MessageGroupRow, b: MessageGroupRow) {
   return (
     a.key === b.key &&
     a.estimatedHeight === b.estimatedHeight &&
+    a.continuesFromPrevious === b.continuesFromPrevious &&
+    a.continuesToNext === b.continuesToNext &&
     sameStringList(a.messageIds, b.messageIds) &&
     a.messages.every((message, index) => message === b.messages[index])
   )
@@ -133,44 +134,25 @@ function sameRow(a: MessageGroupRow, b: MessageGroupRow) {
 
 function reusePageRecords(previous: StableChatPage[] | undefined, next: StableChatPage[]): StableChatPage[] {
   if (!previous) return next
-  const stableKeyPages = keepStablePageKeys(previous, next)
-  if (previous.length !== stableKeyPages.length) return stableKeyPages
-  let changed = false
-  const pages = stableKeyPages.map((page, index) => {
-    const previousPage = previous[index]
+  const previousByKey = new Map(previous.map(page => [page.key, page]))
+  let changed = previous.length !== next.length
+  const pages = next.map((page, index) => {
+    const previousPage = previousByKey.get(page.key)
     if (
+      previousPage &&
       previousPage.key === page.key &&
       previousPage.estimatedHeight === page.estimatedHeight &&
       sameStringList(previousPage.messageIds, page.messageIds) &&
       previousPage.rows.length === page.rows.length &&
       previousPage.rows.every((row, rowIndex) => sameRow(row, page.rows[rowIndex]))
     ) {
+      if (previous[index] !== previousPage) changed = true
       return previousPage
     }
     changed = true
     return page
   })
-  return changed ? pages : previous
-}
-
-function keepStablePageKeys(previous: StableChatPage[], next: StableChatPage[]): StableChatPage[] {
-  if (previous.length === 0 || next.length === 0) return next
-  const usedPreviousKeys = new Set<string>()
-  let changed = false
-
-  const pages = next.map(page => {
-    const match = previous.find(previousPage => {
-      if (usedPreviousKeys.has(previousPage.key)) return false
-      return findMessageSequenceOffset(page.messageIds, previousPage.messageIds) !== -1
-    })
-    if (!match) return page
-    usedPreviousKeys.add(match.key)
-    if (match.key === page.key) return page
-    changed = true
-    return { ...page, key: match.key }
-  })
-
-  return changed ? pages : next
+  return !changed && previous.length === pages.length ? previous : pages
 }
 
 function buildForkTargetIdMap(entries: VisibleMessageEntry[]) {
@@ -191,7 +173,14 @@ export function buildChatPageViewModel(messages: Message[], previous?: ChatPageV
     buildVisibleMessageEntries(messages),
   )
   const visibleMessages = visibleMessagesFromEntries(previous?.visibleMessages, visibleMessageEntries)
-  const pageRecords = reusePageRecords(previous?.pageRecords, buildContentKeyedChatPages(visibleMessages))
+  const pageRecords = reusePageRecords(
+    previous?.pageRecords,
+    reconcileStableChatPages({
+      currentPages: previous?.pageRecords ?? [],
+      nextMessages: visibleMessages,
+      allocateKey: page => page.key,
+    }),
+  )
   const forkTargetIdMap = reuseMap(previous?.forkTargetIdMap, buildForkTargetIdMap(visibleMessageEntries))
   const outlineModel = getStableOutlineModel(visibleMessages)
   const turnDurationMap = reuseMap(previous?.turnDurationMap, buildTurnDurationMap(messages, visibleMessages))

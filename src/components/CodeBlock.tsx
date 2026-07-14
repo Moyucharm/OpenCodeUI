@@ -1,6 +1,6 @@
-import { memo, useCallback, useDeferredValue, useMemo, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useInputCapabilities } from '../hooks/useInputCapabilities'
-import { useStreamingSyntaxHighlight, useSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
+import { useSyntaxHighlight, useStreamingSyntaxHighlight, type HighlightTokens } from '../hooks/useSyntaxHighlight'
 import { themeStore } from '../store/themeStore'
 import { CopyButton } from './ui'
 import { useInView } from '../hooks/useInView'
@@ -44,6 +44,50 @@ function renderIncrementalTokens(tokens: HighlightTokens, suffix: string) {
   )
 }
 
+type FlatHighlightToken = { content: string; color?: string }
+
+function flattenTokens(tokens: HighlightTokens, suffix: string): FlatHighlightToken[] {
+  const result: FlatHighlightToken[] = []
+  tokens.forEach((line, lineIndex) => {
+    line.forEach(token => result.push({ content: token.content, color: token.color }))
+    if (lineIndex < tokens.length - 1) result.push({ content: '\n' })
+  })
+  if (suffix) result.push({ content: suffix })
+  return result
+}
+
+function sameFlatToken(left: FlatHighlightToken, right: FlatHighlightToken | undefined) {
+  return !!right && left.content === right.content && left.color === right.color
+}
+
+const StreamingCodeTokens = memo(function StreamingCodeTokens({ tokens, suffix }: { tokens: HighlightTokens; suffix: string }) {
+  const codeRef = useRef<HTMLElement | null>(null)
+  const previousRef = useRef<FlatHighlightToken[]>([])
+  const flatTokens = useMemo(() => flattenTokens(tokens, suffix), [suffix, tokens])
+
+  useLayoutEffect(() => {
+    const code = codeRef.current
+    if (!code) return
+
+    const previous = previousRef.current
+    let keep = 0
+    while (keep < previous.length && keep < flatTokens.length && sameFlatToken(previous[keep], flatTokens[keep])) {
+      keep += 1
+    }
+
+    while (code.childNodes.length > keep) code.lastChild?.remove()
+    flatTokens.slice(keep).forEach(token => {
+      const node = document.createElement('span')
+      if (token.color) node.style.color = token.color
+      node.textContent = token.content
+      code.appendChild(node)
+    })
+    previousRef.current = flatTokens
+  }, [flatTokens])
+
+  return <code ref={codeRef} className="font-mono select-text" />
+})
+
 interface CodeBlockProps {
   code: string
   language?: string
@@ -61,6 +105,8 @@ interface CodeBlockProps {
   forceHighlight?: boolean
   /** Use incremental Shiki tokenization for streaming code. */
   streamingHighlight?: boolean
+  /** Persistent controls rendered beside the copy action. */
+  headerActions?: ReactNode
 }
 
 export const CodeBlock = memo(function CodeBlock({
@@ -74,6 +120,7 @@ export const CodeBlock = memo(function CodeBlock({
   deferHighlight = false,
   forceHighlight = false,
   streamingHighlight = false,
+  headerActions,
 }: CodeBlockProps) {
   const { codeWordWrap } = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot)
   const { preferTouchUi } = useInputCapabilities()
@@ -167,9 +214,13 @@ export const CodeBlock = memo(function CodeBlock({
       }`}
       suppressHydrationWarning
     >
-      <code className="font-mono select-text">
-        {renderIncrementalTokens(displayedHighlight.tokens, displayedHighlight.suffix)}
-      </code>
+      {shouldStreamHighlight ? (
+        <StreamingCodeTokens tokens={displayedHighlight.tokens} suffix={displayedHighlight.suffix} />
+      ) : (
+        <code className="font-mono select-text">
+          {renderIncrementalTokens(displayedHighlight.tokens, displayedHighlight.suffix)}
+        </code>
+      )}
     </pre>
   ) : (
     <pre className={`${contentPad} m-0 font-mono select-text ${textColor} ${fontSize} ${lineHeight} ${wrapClasses}`}>
@@ -206,7 +257,8 @@ export const CodeBlock = memo(function CodeBlock({
           <div className="flex h-8 min-w-0 items-center text-[length:var(--fs-xs)] font-medium leading-none tracking-wide text-text-500 select-none">
             <span className="truncate">{language}</span>
           </div>
-          <div className="inline-flex h-8 shrink-0 items-center pr-2 opacity-0 group-hover/code:opacity-100 group-focus-within/code:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+          <div className="inline-flex h-8 shrink-0 items-center gap-0.5 pr-2 opacity-0 group-hover/code:opacity-100 group-focus-within/code:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
+            {headerActions}
             <CopyButton text={code} position="static" className="!h-8 !w-8 !p-2" />
           </div>
         </div>
